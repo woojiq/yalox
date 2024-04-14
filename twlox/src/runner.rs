@@ -88,17 +88,15 @@ impl Runner {
     pub fn run(&mut self, src: &str) -> Result<(), Error> {
         let mut scanner = Scanner::new();
         let tokens = scanner.scan(src).map_err(Error::Scanner)?;
-        // println!("{:?}", tokens);
 
         let mut parser = Parser::new(tokens);
         let statements = parser.parse().map_err(Error::Parser)?;
 
-        let mut resolver = Resolver::new(&mut self.interpreter);
+        let mut callback = |pos, dep| self.interpreter.resolve(pos, dep);
+        let mut resolver = Resolver::new(&mut callback);
         resolver
             .resolve_stmts(&statements)
             .map_err(Error::Resolver)?;
-
-        // println!("\n{:?}", statements);
 
         self.interpreter
             .interpret(&statements)
@@ -124,7 +122,7 @@ mod test {
         let mut runner = Runner::new();
         runner.run(src).unwrap();
         let env = runner.interpreter.env();
-        assert_eq!(env.get("a"), Some(Value::Num(1.0)));
+        assert_eq!(env.get("a"), Some(Value::Num(1.0).to_rc()));
     }
 
     #[test]
@@ -133,7 +131,7 @@ mod test {
         let mut runner = Runner::new();
         runner.run(src).unwrap();
         let env = runner.interpreter.env();
-        assert_eq!(env.get("a"), Some(Value::Num(15.6)));
+        assert_eq!(env.get("a"), Some(Value::Num(15.6).to_rc()));
     }
 
     #[test]
@@ -142,7 +140,16 @@ mod test {
         let mut runner = Runner::new();
         runner.run(src).unwrap();
         let env = runner.interpreter.env();
-        assert_eq!(env.get("res"), Some(Value::Num(4.0)));
+        assert_eq!(env.get("res"), Some(Value::Num(4.0).to_rc()));
+    }
+
+    #[test]
+    fn function_global_var() {
+        let src = "var a = 0; fun mul(a) {a = a + 1;} mul(a); mul(a);";
+        let mut runner = Runner::new();
+        runner.run(src).unwrap();
+        let env = runner.interpreter.env();
+        assert_eq!(env.get("a"), Some(Value::Num(2.0).to_rc()));
     }
 
     #[test]
@@ -155,6 +162,25 @@ print b;
         let mut runner = Runner::new();
         runner.run(src).unwrap();
         let env = runner.interpreter.env();
-        assert_eq!(env.get("b"), Some(Value::Str("global".to_string())));
+        assert_eq!(env.get("b"), Some(Value::Str("global".to_string()).to_rc()));
+    }
+
+    #[test]
+    fn class() {
+        let src = "\
+var v = 0;
+var v2 = 0;
+class Bacon {
+    eat(v) {
+        v = v + 1;
+    }
+}
+Bacon().eat(v); Bacon().eat(v2); Bacon().eat(v);
+";
+        let mut runner = Runner::new();
+        runner.run(src).unwrap();
+        let env = runner.interpreter.env();
+        assert_eq!(env.get("v"), Some(Value::Num(2.0).to_rc()));
+        assert_eq!(env.get("v"), Some(Value::Num(1.0).to_rc()));
     }
 }

@@ -20,6 +20,7 @@
             rust-bin.stable.latest.default
             rust-analyzer
             gdb
+            cargo-tarpaulin
           ];
         };
         devShells.nightly = pkgs.mkShell {

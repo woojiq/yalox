@@ -134,6 +134,12 @@ pub mod stmt {
             },
         }
     }
+
+    impl Stmt {
+        pub fn to_box(self) -> Box<Self> {
+            self.into()
+        }
+    }
 }
 
 pub mod expr {
@@ -153,10 +159,16 @@ pub mod expr {
             Call {
                 callee: Box<Expr>,
                 arguments: Vec<Expr>,
+                closing_paren: Token,
             },
             Get {
                 obj: Box<Expr>,
                 name: Token,
+            },
+            Set {
+                obj: Box<Expr>,
+                name: Token,
+                value: Box<Expr>,
             },
             Unary {
                 op: Token,
@@ -212,12 +224,17 @@ pub mod expr {
                 Expr::Assign(a) => write!(f, "{} = {}", a.name.lexeme(), a.value),
                 Expr::Variable(v) => v.name.lexeme().fmt(f),
                 Expr::Get(g) => write!(f, "{}.{}", g.obj, g.name.lexeme()),
+                Expr::Set(s) => write!(f, "{}.{} = {}", s.obj, s.name.lexeme(), s.value),
             }
         }
     }
 
     // Wasn't able to generate this in ast_helper! macro.
     impl Expr {
+        pub fn to_box(self) -> Box<Self> {
+            self.into()
+        }
+
         pub fn new_number(value: f64) -> Self {
             Self::Literal(Literal::Number(value))
         }

@@ -1,38 +1,8 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fmt,
-    ops::{Add, Div, Mul, Neg, Not, Sub},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
 use crate::{ast::stmt, scanner::token::Token};
 
-use super::{environment::Environment, stmt::Class, Error, Interpreter};
-
-#[derive(Clone, Copy, Debug)]
-pub enum ValueOpError {
-    Sub,
-    Add,
-    Div,
-    Not,
-    Neg,
-    Mul,
-}
-
-impl fmt::Display for ValueOpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let op = match self {
-            ValueOpError::Sub => "subtraction",
-            ValueOpError::Add => "addition",
-            ValueOpError::Div => "division",
-            ValueOpError::Not => "not operation",
-            ValueOpError::Neg => "negative operation",
-            ValueOpError::Mul => "multiplication",
-        };
-        write!(f, "wrong hands of {op}")
-    }
-}
+use super::{environment::Environment, Error, Interpreter, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -44,6 +14,24 @@ pub enum Value {
     Class(Class),
     Instance(Instance),
     Nil,
+}
+
+pub type PValue = Rc<RefCell<Value>>;
+
+impl Value {
+    pub fn is_truthy(&self) -> bool {
+        !matches!(self, Value::Nil | Value::Bool(false))
+    }
+
+    pub fn to_rc(self) -> PValue {
+        self.into()
+    }
+}
+
+impl From<Value> for PValue {
+    fn from(value: Value) -> Self {
+        Rc::new(RefCell::new(value))
+    }
 }
 
 impl From<bool> for Value {
@@ -80,106 +68,20 @@ impl fmt::Display for Value {
             Value::Function(v) => write!(f, "<fun>{}", v.declaration.name.lexeme()),
             Value::NativeFunction(v) => write!(f, "<fun>{}", v.name),
             Value::Class(v) => write!(f, "<class>{}", v.name.lexeme()),
-            Value::Instance(v) => write!(f, "{} instance", v.class.name.lexeme()),
-        }
-    }
-}
-
-impl Neg for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn neg(self) -> Self::Output {
-        match self {
-            Value::Num(v) => Ok(Self::Num(-v)),
-            _ => Err(ValueOpError::Neg),
-        }
-    }
-}
-
-impl Not for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn not(self) -> Self::Output {
-        match self {
-            Value::Bool(v) => Ok(Self::Bool(!v)),
-            _ => Err(ValueOpError::Not),
-        }
-    }
-}
-
-impl Sub for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Num(lhs), Self::Num(rhs)) => Ok(Self::Num(lhs - rhs)),
-            _ => Err(ValueOpError::Sub),
-        }
-    }
-}
-
-impl Add for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Num(lhs), Self::Num(rhs)) => Ok(Self::Num(lhs + rhs)),
-            (Self::Str(lhs), Self::Str(rhs)) => Ok(Self::Str(lhs + &rhs)),
-            _ => Err(ValueOpError::Add),
-        }
-    }
-}
-
-impl Div for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Num(lhs), Self::Num(rhs)) => Ok(Self::Num(lhs / rhs)),
-            _ => Err(ValueOpError::Div),
-        }
-    }
-}
-
-impl Mul for Value {
-    type Output = Result<Value, ValueOpError>;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Self::Num(lhs), Self::Num(rhs)) => Ok(Self::Num(lhs * rhs)),
-            _ => Err(ValueOpError::Mul),
-        }
-    }
-}
-
-impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        use std::cmp::Ordering;
-        match (self, other) {
-            (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(r),
-            (Value::Num(l), Value::Num(r)) => l.partial_cmp(r),
-            (Value::Str(l), Value::Str(r)) => l.partial_cmp(r),
-            (Value::Nil, Value::Nil) => Some(Ordering::Equal),
-            _ => None,
+            Value::Instance(v) => write!(f, "<instance>{}", v.class.name.lexeme()),
         }
     }
 }
 
 pub trait Callable {
     fn arity(&self) -> usize;
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Result<Value, Error>;
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub declaration: stmt::Function,
     pub closure: Rc<RefCell<Environment>>,
-}
-
-impl PartialEq for Function {
-    fn eq(&self, _other: &Self) -> bool {
-        false
-    }
 }
 
 impl Callable for Function {
@@ -187,32 +89,28 @@ impl Callable for Function {
         self.declaration.params.len()
     }
 
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Result<Value, Error> {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
         let env = Rc::new(RefCell::new(Environment::new(self.closure.clone())));
         let mut env_mut = env.borrow_mut();
+        // println!("{}", *env_mut);
         for (param, arg) in self.declaration.params.iter().zip(args) {
             env_mut.define(param.lexeme(), arg);
         }
+        // println!("{}", *env_mut);
         drop(env_mut);
         match interpreter.execute_block(&self.declaration.body, env) {
-            Ok(_) => Ok(Value::Nil),
+            Ok(_) => Ok(Value::Nil.to_rc()),
             Err(Error::Return(val)) => Ok(val),
             Err(err) => Err(err),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NativeFunction {
     pub name: String,
     pub arity: usize,
-    pub fun: fn(&mut Interpreter, Vec<Value>) -> Value,
-}
-
-impl PartialEq for NativeFunction {
-    fn eq(&self, _other: &Self) -> bool {
-        false
-    }
+    pub fun: fn(&mut Interpreter, Vec<PValue>) -> Value,
 }
 
 impl Callable for NativeFunction {
@@ -220,39 +118,49 @@ impl Callable for NativeFunction {
         self.arity
     }
 
-    fn call(&self, interpreter: &mut Interpreter, args: Vec<Value>) -> Result<Value, Error> {
-        Ok((self.fun)(interpreter, args))
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
+        Ok((self.fun)(interpreter, args).to_rc())
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instance {
-    class: Rc<Class>,
-    fields: HashMap<String, Value>,
-}
-
-impl PartialEq for Instance {
-    fn eq(&self, other: &Self) -> bool {
-        self.class.name == other.class.name && self.fields == other.fields
-    }
+    pub class: Class,
+    pub fields: HashMap<String, PValue>,
 }
 
 impl Instance {
-    pub fn get(&self, name: &Token) -> Value {
-        todo!()
+    pub fn get(&self, name: &Token) -> Option<PValue> {
+        if self.fields.contains_key(name.lexeme()) {
+            return self.fields.get(name.lexeme()).cloned();
+        }
+        self.class
+            .methods
+            .get(name.lexeme())
+            .map(|func| Rc::new(RefCell::new(Value::Function(func.borrow().clone()))))
+    }
+
+    pub fn set(&mut self, name: &Token, val: PValue) {
+        self.fields.insert(name.lexeme().to_owned(), val);
     }
 }
 
-impl Callable for Rc<Class> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Class {
+    pub name: Token,
+    pub methods: HashMap<String, Rc<RefCell<Function>>>,
+}
+
+impl Callable for Class {
     fn arity(&self) -> usize {
         0
     }
 
-    fn call(&self, _interpreter: &mut Interpreter, _args: Vec<Value>) -> Result<Value, Error> {
+    fn call(&self, _interpreter: &mut Interpreter, _args: Vec<PValue>) -> Result {
         let instance = Instance {
-            class: Rc::clone(self),
+            class: self.clone(),
             fields: HashMap::default(),
         };
-        Ok(Value::Instance(instance))
+        Ok(Value::Instance(instance).to_rc())
     }
 }

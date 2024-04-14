@@ -14,7 +14,6 @@ use core::fmt;
 use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
-    ops::{Add, Div, Mul, Sub},
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -23,33 +22,49 @@ use crate::ast::*;
 
 use self::{
     environment::Environment,
-    value::{Callable, Function, NativeFunction, Value, ValueOpError},
+    expr::Set,
+    value::{Callable, Function, NativeFunction, PValue, Value},
 };
 
 #[derive(Debug, Clone)]
 pub enum Error {
-    BinaryOp { msg: String, op: Token },
-    UnaryOp { msg: String, op: Token },
-    UndefinedVariable { tok: Token },
-    Arity { callee: Value },
-    ConditionExpected { stmt: stmt::If },
-    PropertyNotOnObj { property: Token },
+    UndefinedVariable {
+        tok: Token,
+    },
+    UndefinedProperty {
+        tok: Token,
+    },
+    Arity {
+        tok: Token,
+    },
+    ConditionExpected {
+        stmt: stmt::If,
+    },
+    PropertyNotOnObj {
+        property: Token,
+    },
+    InvalidOperand {
+        op: Token,
+        expected: &'static str,
+        found: Value,
+    },
+    DivisionByZero {
+        op: Token,
+    },
 
     // === Not exactly Errors === //
-    Return(Value),
+    Return(PValue),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T = PValue, E = Error> = std::result::Result<T, E>;
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::BinaryOp { msg, op } => write!(f, "{} at {}", msg, op.pos()),
-            Error::UnaryOp { msg, op } => write!(f, "{} at {}", msg, op.pos()),
             Error::UndefinedVariable { tok } => {
                 write!(f, "undefined variable {} at {}", tok.lexeme(), tok.pos())
             }
-            Error::Arity { callee } => write!(f, "inappropriate arity {}", callee),
+            Error::Arity { tok } => write!(f, "wrong arity at {}", tok.pos()),
             Error::ConditionExpected { stmt } => {
                 write!(f, "expected boolean in condition: {}", stmt.condition)
             }
@@ -57,6 +72,24 @@ impl fmt::Display for Error {
             Error::PropertyNotOnObj { property: prop } => {
                 write!(f, "only instances have properties at {}", prop.pos())
             }
+            Error::UndefinedProperty { tok } => {
+                write!(f, "undefined property {} at {}", tok.lexeme(), tok.pos())
+            }
+            Error::InvalidOperand {
+                op,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "'{}' expected {}, found {} at {}",
+                    op.lexeme(),
+                    expected,
+                    found,
+                    op.pos()
+                )
+            }
+            Error::DivisionByZero { op } => write!(f, "division by zero at {}", op.pos()),
         }
     }
 }
@@ -64,6 +97,7 @@ impl fmt::Display for Error {
 pub struct Interpreter {
     env: Rc<RefCell<Environment>>,
     globals: Rc<RefCell<Environment>>,
+    /// Depth of a variable at specific location.
     locals: HashMap<Position, usize>,
 }
 
@@ -83,7 +117,8 @@ impl Interpreter {
                             .as_secs_f64(),
                     )
                 },
-            }),
+            })
+            .to_rc(),
         );
 
         Self {
@@ -100,7 +135,7 @@ impl Interpreter {
         Ok(())
     }
 
-    fn evaluate(&mut self, expr: &Expr) -> Result<Value> {
+    fn evaluate(&mut self, expr: &Expr) -> Result {
         expr.accept(self)
     }
 
@@ -117,8 +152,7 @@ impl Interpreter {
         self.env = env;
         let res = self.interpret(statements);
         self.env = prev_env;
-        res?;
-        Ok(())
+        res
     }
 
     pub fn env(&self) -> Ref<'_, Environment> {
@@ -129,13 +163,14 @@ impl Interpreter {
         self.locals.insert(pos, depth);
     }
 
-    fn lookup_variable(&self, token: Token) -> Result<Value> {
+    fn lookup_variable(&self, token: Token) -> Result {
         if let Some(depth) = self.locals.get(&token.pos()) {
             self.env.borrow().get_at(token.lexeme(), *depth)
         } else {
             self.globals.borrow().get(token.lexeme())
         }
         .ok_or(Error::UndefinedVariable { tok: token })
+        .map(Into::into)
     }
 }
 
@@ -145,69 +180,167 @@ impl Default for Interpreter {
     }
 }
 
-impl ExprVisitor<Result<Value>> for Interpreter {
-    fn visit_binary(&mut self, expr: &expr::Binary) -> Result<Value> {
-        let lhs = self.evaluate(&expr.left)?;
-        let rhs = self.evaluate(&expr.right)?;
-        let res: std::result::Result<Value, ValueOpError> = {
-            let (lhs, rhs) = (lhs.clone(), rhs.clone());
-            match expr.op.get_type() {
-                TokenType::Minus => lhs.sub(rhs),
-                TokenType::Plus => lhs.add(rhs),
-                TokenType::Slash => lhs.div(rhs),
-                TokenType::Star => lhs.mul(rhs),
-                TokenType::BangEqual => Ok(lhs.ne(&rhs).into()),
-                TokenType::EqualEqual => Ok(lhs.eq(&rhs).into()),
-                TokenType::Greater => Ok((lhs > rhs).into()),
-                TokenType::GreaterEqual => Ok((lhs >= rhs).into()),
-                TokenType::Less => Ok((lhs < rhs).into()),
-                TokenType::LessEqual => Ok((lhs <= rhs).into()),
-                TokenType::False => Ok(false.into()),
-                TokenType::True => Ok(true.into()),
-                _ => unreachable!(),
-            }
-        };
-        res.map_err(|e| Error::BinaryOp {
-            msg: e.to_string(),
-            op: expr.op.clone(),
-        })
+impl ExprVisitor<Result> for Interpreter {
+    fn visit_binary(&mut self, expr: &expr::Binary) -> Result {
+        let lhs_rc = self.evaluate(&expr.left)?;
+        let rhs_rc = self.evaluate(&expr.right)?;
+        let lhs = &*lhs_rc.borrow();
+        let rhs = &*rhs_rc.borrow();
+        match expr.op.get_type() {
+            TokenType::Minus => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Num(l - r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::Plus => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Num(l + r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (Value::Str(l), Value::Str(r)) => Ok(Value::Str(l.to_owned() + r).to_rc()),
+                (Value::Str(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "String",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number or String",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::Slash => match (lhs, rhs) {
+                (Value::Num(_), Value::Num(r)) if *r == 0.0 => Err(Error::DivisionByZero {
+                    op: expr.op.clone(),
+                }),
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Num(l / r).to_rc()),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::Star => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Num(l * r).to_rc()),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::BangEqual => Ok(Value::Bool(lhs != rhs).to_rc()),
+            TokenType::EqualEqual => Ok(Value::Bool(lhs == rhs).to_rc()),
+            TokenType::Greater => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Bool(l > r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::GreaterEqual => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Bool(l >= r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::Less => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Bool(l < r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::LessEqual => match (lhs, rhs) {
+                (Value::Num(l), Value::Num(r)) => Ok(Value::Bool(l <= r).to_rc()),
+                (Value::Num(_), v) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+                (v, _) => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::False => Ok(Value::from(false).to_rc()),
+            TokenType::True => Ok(Value::from(true).to_rc()),
+            _ => unreachable!(),
+        }
     }
 
-    fn visit_grouping(&mut self, expr: &expr::Grouping) -> Result<Value> {
+    fn visit_grouping(&mut self, expr: &expr::Grouping) -> Result {
         self.evaluate(&expr.inner)
     }
 
-    fn visit_literal(&mut self, expr: &expr::Literal) -> Result<Value> {
+    fn visit_literal(&mut self, expr: &expr::Literal) -> Result {
         Ok(match expr {
             expr::Literal::Number(n) => Value::Num(*n),
             expr::Literal::String(s) => Value::Str(s.to_string()),
             expr::Literal::Bool(b) => Value::Bool(*b),
             expr::Literal::Nil => Value::Nil,
-        })
+        }
+        .into())
     }
 
-    fn visit_unary(&mut self, expr: &expr::Unary) -> Result<Value> {
-        let val = self.evaluate(&expr.inner)?;
-        let res = {
-            let val = val.clone();
-            match expr.op.get_type() {
-                TokenType::Minus => -val,
-                TokenType::Bang => !val,
-                _ => unreachable!(),
-            }
-        };
-
-        res.map_err(|e| Error::UnaryOp {
-            msg: e.to_string(),
-            op: expr.op.clone(),
-        })
+    fn visit_unary(&mut self, expr: &expr::Unary) -> Result {
+        let val_rc = self.evaluate(&expr.inner)?;
+        let val = &*val_rc.borrow();
+        match expr.op.get_type() {
+            TokenType::Minus => match val {
+                Value::Num(val) => Ok(Value::Num(-val).to_rc()),
+                v => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Number",
+                    found: v.clone(),
+                }),
+            },
+            TokenType::Bang => match val {
+                Value::Bool(val) => Ok(Value::Bool(!val).to_rc()),
+                v => Err(Error::InvalidOperand {
+                    op: expr.op.clone(),
+                    expected: "Bool",
+                    found: v.clone(),
+                }),
+            },
+            _ => unreachable!(),
+        }
     }
 
-    fn visit_variable(&mut self, expr: &expr::Variable) -> Result<Value> {
+    fn visit_variable(&mut self, expr: &expr::Variable) -> Result {
         self.lookup_variable(expr.name.clone())
     }
 
-    fn visit_assign(&mut self, expr: &expr::Assign) -> Result<Value> {
+    fn visit_assign(&mut self, expr: &expr::Assign) -> Result {
         let value = self.evaluate(&expr.value)?;
         let status = if let Some(&depth) = self.locals.get(&expr.name.pos()) {
             self.env
@@ -219,35 +352,29 @@ impl ExprVisitor<Result<Value>> for Interpreter {
                 .assign(expr.name.lexeme(), value.clone())
         };
         match status {
-            true => Ok(value),
-            false => Err(Error::UndefinedVariable {
+            Ok(()) => Ok(value),
+            Err(environment::Error::VarNotFound) => Err(Error::UndefinedVariable {
                 tok: expr.name.clone(),
             }),
         }
     }
 
-    fn visit_logical(&mut self, expr: &expr::Logical) -> Result<Value> {
-        let lhs: bool = self.evaluate(&expr.left)?.into();
+    fn visit_logical(&mut self, expr: &expr::Logical) -> Result {
+        let lhs = self.evaluate(&expr.left)?;
         match expr.op.get_type() {
-            TokenType::And => Ok(if lhs {
-                Value::Bool(self.evaluate(&expr.right)?.into())
-            } else {
-                Value::Bool(false)
-            }),
-            TokenType::OR => Ok(if !lhs {
-                Value::Bool(self.evaluate(&expr.right)?.into())
-            } else {
-                Value::Bool(true)
-            }),
-            _ => unreachable!(),
+            TokenType::And if !lhs.borrow().is_truthy() => Ok(lhs),
+            TokenType::OR if lhs.borrow().is_truthy() => Ok(lhs),
+            _ => self.evaluate(&expr.right),
         }
     }
 
-    fn visit_call(&mut self, expr: &expr::Call) -> Result<Value> {
-        let callee = self.evaluate(&expr.callee)?;
-        let callable: Box<dyn Callable> = match callee.clone() {
+    fn visit_call(&mut self, expr: &expr::Call) -> Result {
+        let callee_rc = self.evaluate(&expr.callee)?;
+        let callee = &*callee_rc.borrow();
+        let callable: Box<&dyn Callable> = match callee {
             Value::Function(f) => Box::new(f),
             Value::NativeFunction(f) => Box::new(f),
+            Value::Class(f) => Box::new(f),
             _ => unreachable!(),
         };
 
@@ -258,20 +385,38 @@ impl ExprVisitor<Result<Value>> for Interpreter {
             .collect::<Result<Vec<_>>>()?;
 
         if args.len() != callable.arity() {
-            return Err(Error::Arity { callee });
+            return Err(Error::Arity {
+                tok: expr.closing_paren.clone(),
+            });
         }
         callable.call(self, args)
     }
 
-    fn visit_get(&mut self, expr: &expr::Get) -> Result<Value> {
-        todo!();
-        let obj = self.evaluate(&expr.obj)?;
-        if let Value::Instance(val) = &obj {
-            return Ok(val.get(&expr.name));
+    fn visit_get(&mut self, expr: &expr::Get) -> Result {
+        let obj_rc = self.evaluate(&expr.obj)?;
+        let obj = obj_rc.borrow();
+        if let Value::Instance(val) = &*obj {
+            val.get(&expr.name).ok_or(Error::UndefinedProperty {
+                tok: expr.name.clone(),
+            })
+        } else {
+            Err(Error::PropertyNotOnObj {
+                property: expr.name.clone(),
+            })
         }
-        Err(Error::PropertyNotOnObj {
-            property: expr.name.clone(),
-        })
+    }
+
+    fn visit_set(&mut self, expr: &Set) -> Result {
+        let obj_rc = self.evaluate(&expr.obj)?;
+        let mut obj = obj_rc.borrow_mut();
+        let Value::Instance(val) = &mut *obj else {
+            return Err(Error::PropertyNotOnObj {
+                property: expr.name.clone(),
+            });
+        };
+        let value = self.evaluate(&expr.value)?;
+        val.set(&expr.name, value.clone());
+        Ok(value)
     }
 }
 
@@ -284,10 +429,30 @@ impl StmtVisitor<Result<()>> for Interpreter {
     }
 
     fn visit_class(&mut self, stmt: &stmt::Class) -> Result<()> {
-        self.env.borrow_mut().define(stmt.name.lexeme(), Value::Nil);
-        let class = Value::Class(stmt.clone());
-        self.env.borrow_mut().assign(stmt.name.lexeme(), class);
-        Ok(())
+        self.env
+            .borrow_mut()
+            .define(stmt.name.lexeme(), Value::Nil.to_rc());
+        let mut methods = HashMap::default();
+        for method in &stmt.methods {
+            let func = Function {
+                declaration: method.clone(),
+                closure: self.env.clone(),
+            };
+            methods.insert(
+                method.name.lexeme().to_string(),
+                Rc::new(RefCell::new(func)),
+            );
+        }
+        let class = Value::Class(value::Class {
+            name: stmt.name.clone(),
+            methods,
+        });
+        self.env
+            .borrow_mut()
+            .assign(stmt.name.lexeme(), class.to_rc())
+            .map_err(|_| Error::UndefinedVariable {
+                tok: stmt.name.clone(),
+            })
     }
 
     fn visit_expression(&mut self, stmt: &stmt::Expression) -> Result<()> {
@@ -299,12 +464,14 @@ impl StmtVisitor<Result<()>> for Interpreter {
             declaration: stmt.clone(),
             closure: self.env.clone(),
         });
-        self.env.borrow_mut().define(stmt.name.lexeme(), function);
+        self.env
+            .borrow_mut()
+            .define(stmt.name.lexeme(), function.to_rc());
         Ok(())
     }
 
     fn visit_if(&mut self, stmt: &stmt::If) -> Result<()> {
-        if let Value::Bool(cond) = self.evaluate(&stmt.condition)? {
+        if let Value::Bool(cond) = *self.evaluate(&stmt.condition)?.borrow() {
             match cond {
                 true => self.execute(&stmt.then_branch),
                 false => {
@@ -322,7 +489,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
 
     fn visit_print(&mut self, stmt: &stmt::Print) -> Result<()> {
         let expr = self.evaluate(&stmt.expression)?;
-        println!("{}", expr);
+        println!("{}", *expr.borrow());
         Ok(())
     }
 
@@ -330,7 +497,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
         let value = if let Some(value) = &stmt.value {
             self.evaluate(value)?
         } else {
-            Value::Nil
+            Value::Nil.to_rc()
         };
         Err(Error::Return(value))
     }
@@ -339,14 +506,14 @@ impl StmtVisitor<Result<()>> for Interpreter {
         let value = if let Some(init) = &stmt.initializer {
             self.evaluate(init)?
         } else {
-            Value::Nil
+            Value::Nil.to_rc()
         };
         self.env.borrow_mut().define(stmt.name.lexeme(), value);
         Ok(())
     }
 
     fn visit_while(&mut self, stmt: &stmt::While) -> Result<()> {
-        while bool::from(self.evaluate(&stmt.condition)?) {
+        while self.evaluate(&stmt.condition)?.borrow().is_truthy() {
             self.execute(&stmt.statement)?;
         }
         Ok(())

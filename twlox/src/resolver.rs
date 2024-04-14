@@ -8,7 +8,6 @@ use crate::{
         expr::{ExprVisitor, *},
         stmt::{StmtVisitor, *},
     },
-    interpreter::Interpreter,
     scanner::token::Token,
 };
 
@@ -39,24 +38,25 @@ impl fmt::Display for Error {
     }
 }
 
-type RResult = std::result::Result<(), Vec<Error>>;
+type Result<T = (), E = Vec<Error>> = std::result::Result<T, E>;
 
 #[derive(Copy, Clone, Debug)]
 pub enum FunctionType {
     Function,
+    Method,
     None,
 }
 
 pub struct Resolver<'a> {
-    interpreter: &'a mut Interpreter,
+    resolve_cb: &'a mut dyn FnMut(crate::Position, usize),
     scopes: VecDeque<HashMap<String, bool>>,
     current_func: FunctionType,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(interpreter: &'a mut Interpreter) -> Self {
+    pub fn new(resolve_cb: &'a mut dyn FnMut(crate::Position, usize)) -> Self {
         Self {
-            interpreter,
+            resolve_cb,
             scopes: VecDeque::default(),
             current_func: FunctionType::None,
         }
@@ -70,11 +70,11 @@ impl<'a> Resolver<'a> {
         self.scopes.pop_back();
     }
 
-    fn resolve_stmt(&mut self, stmt: &Stmt) -> RResult {
+    fn resolve_stmt(&mut self, stmt: &Stmt) -> Result {
         stmt.accept(self)
     }
 
-    pub fn resolve_stmts(&mut self, stmts: &[Stmt]) -> RResult {
+    pub fn resolve_stmts(&mut self, stmts: &[Stmt]) -> Result {
         let mut errors = vec![];
         for stmt in stmts {
             if let Err(mut err) = self.resolve_stmt(stmt) {
@@ -109,13 +109,13 @@ impl<'a> Resolver<'a> {
     fn resolve_local(&mut self, name: &Token) {
         for (idx, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains_key(name.lexeme()) {
-                self.interpreter.resolve(name.pos(), idx);
+                (self.resolve_cb)(name.pos(), idx);
                 return;
             }
         }
     }
 
-    fn resolve_func(&mut self, func: &Function, typ: FunctionType) -> RResult {
+    fn resolve_func(&mut self, func: &Function, typ: FunctionType) -> Result {
         let save_type = typ;
         self.current_func = typ;
         let mut errors = vec![];
@@ -136,12 +136,12 @@ impl<'a> Resolver<'a> {
     }
 }
 
-impl<'a> ExprVisitor<RResult> for Resolver<'a> {
-    fn visit_literal(&mut self, _expr: &Literal) -> RResult {
+impl<'a> ExprVisitor<Result> for Resolver<'a> {
+    fn visit_literal(&mut self, _expr: &Literal) -> Result {
         Ok(())
     }
 
-    fn visit_call(&mut self, expr: &Call) -> RResult {
+    fn visit_call(&mut self, expr: &Call) -> Result {
         expr.callee.accept(self)?;
         for arg in &expr.arguments {
             arg.accept(self)?;
@@ -149,33 +149,33 @@ impl<'a> ExprVisitor<RResult> for Resolver<'a> {
         Ok(())
     }
 
-    fn visit_unary(&mut self, expr: &Unary) -> RResult {
+    fn visit_unary(&mut self, expr: &Unary) -> Result {
         expr.inner.accept(self)
     }
 
-    fn visit_logical(&mut self, expr: &Logical) -> RResult {
+    fn visit_logical(&mut self, expr: &Logical) -> Result {
         expr.left.accept(self)?;
         expr.right.accept(self)?;
         Ok(())
     }
 
-    fn visit_grouping(&mut self, expr: &Grouping) -> RResult {
+    fn visit_grouping(&mut self, expr: &Grouping) -> Result {
         expr.inner.accept(self)
     }
 
-    fn visit_binary(&mut self, expr: &Binary) -> RResult {
+    fn visit_binary(&mut self, expr: &Binary) -> Result {
         expr.left.accept(self)?;
         expr.right.accept(self)?;
         Ok(())
     }
 
-    fn visit_assign(&mut self, expr: &Assign) -> RResult {
+    fn visit_assign(&mut self, expr: &Assign) -> Result {
         expr.value.accept(self)?;
         expr.value.accept(self)?;
         Ok(())
     }
 
-    fn visit_variable(&mut self, expr: &Variable) -> RResult {
+    fn visit_variable(&mut self, expr: &Variable) -> Result {
         if self
             .scopes
             .back()
@@ -190,32 +190,40 @@ impl<'a> ExprVisitor<RResult> for Resolver<'a> {
         }
     }
 
-    fn visit_get(&mut self, expr: &Get) -> RResult {
+    fn visit_get(&mut self, expr: &Get) -> Result {
         expr.obj.accept(self)
+    }
+
+    fn visit_set(&mut self, expr: &Set) -> Result {
+        expr.obj.accept(self)?;
+        expr.value.accept(self)
     }
 }
 
-impl<'a> StmtVisitor<RResult> for Resolver<'a> {
-    fn visit_block(&mut self, stmt: &Block) -> RResult {
+impl<'a> StmtVisitor<Result> for Resolver<'a> {
+    fn visit_block(&mut self, stmt: &Block) -> Result {
         self.begin_scope();
         self.resolve_stmts(&stmt.statements)?;
         self.end_scope();
         Ok(())
     }
 
-    fn visit_class(&mut self, stmt: &Class) -> RResult {
+    fn visit_class(&mut self, stmt: &Class) -> Result {
         if let Err(err) = self.declare(&stmt.name) {
             return Err(vec![err]);
         }
         self.define(&stmt.name);
+        for method in &stmt.methods {
+            self.resolve_func(method, FunctionType::Method)?;
+        }
         Ok(())
     }
 
-    fn visit_expression(&mut self, stmt: &Expression) -> RResult {
+    fn visit_expression(&mut self, stmt: &Expression) -> Result {
         stmt.expression.accept(self)
     }
 
-    fn visit_function(&mut self, stmt: &Function) -> RResult {
+    fn visit_function(&mut self, stmt: &Function) -> Result {
         let mut errors = vec![];
         if let Err(err) = self.declare(&stmt.name) {
             errors.push(err);
@@ -230,7 +238,7 @@ impl<'a> StmtVisitor<RResult> for Resolver<'a> {
         }
     }
 
-    fn visit_if(&mut self, stmt: &If) -> RResult {
+    fn visit_if(&mut self, stmt: &If) -> Result {
         stmt.condition.accept(self)?;
         self.resolve_stmt(&stmt.then_branch)?;
         if let Some(br) = &stmt.else_branch {
@@ -239,11 +247,11 @@ impl<'a> StmtVisitor<RResult> for Resolver<'a> {
         Ok(())
     }
 
-    fn visit_print(&mut self, stmt: &Print) -> RResult {
+    fn visit_print(&mut self, stmt: &Print) -> Result {
         stmt.expression.accept(self)
     }
 
-    fn visit_return(&mut self, stmt: &Return) -> RResult {
+    fn visit_return(&mut self, stmt: &Return) -> Result {
         if let FunctionType::None = self.current_func {
             return Err(vec![Error::ReturnNotInFunc]);
         }
@@ -253,7 +261,7 @@ impl<'a> StmtVisitor<RResult> for Resolver<'a> {
         Ok(())
     }
 
-    fn visit_var(&mut self, stmt: &Var) -> RResult {
+    fn visit_var(&mut self, stmt: &Var) -> Result {
         let mut errors = vec![];
         if let Err(err) = self.declare(&stmt.name) {
             errors.push(err);
@@ -270,8 +278,13 @@ impl<'a> StmtVisitor<RResult> for Resolver<'a> {
         }
     }
 
-    fn visit_while(&mut self, stmt: &While) -> RResult {
+    fn visit_while(&mut self, stmt: &While) -> Result {
         stmt.condition.accept(self)?;
         self.resolve_stmt(&stmt.statement)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
 }

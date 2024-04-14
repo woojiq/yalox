@@ -1,10 +1,5 @@
 use std::fmt::Display;
 
-/*  NOTE:
-    Almost everywhere here where we use `.into()` method, we just convert `Expr`
-    or `Stmt` to the boxed version. This is prettier than `Box::new(...)`, imo.
-*/
-
 use crate::{
     ast::{expr::*, stmt::*},
     scanner::token::{Token, TokenType},
@@ -132,7 +127,7 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
-            tokens: tokens.into(),
+            tokens: Tokens::from(tokens),
         }
     }
 
@@ -268,7 +263,7 @@ impl Parser {
             body = Stmt::new_block(vec![body, Stmt::new_expression(increment)])
         }
 
-        body = Stmt::new_while(condition, body.into());
+        body = Stmt::new_while(condition, body.to_box());
 
         if let Some(init) = init {
             body = Stmt::new_block(vec![init, body]);
@@ -282,16 +277,16 @@ impl Parser {
         let condition = self.expression()?;
         self.try_consume(TokenType::RightParen)?;
         let body = self.statement()?;
-        Ok(Stmt::new_while(condition, body.into()))
+        Ok(Stmt::new_while(condition, body.to_box()))
     }
 
     fn if_statement(&mut self) -> Result<Stmt> {
         self.try_consume(TokenType::LeftParen)?;
         let condition = self.expression()?;
         self.try_consume(TokenType::RightParen)?;
-        let then_branch = self.statement()?.into();
+        let then_branch = self.statement()?.to_box();
         let else_branch = if self.tokens.next_if_type_b(TokenType::Else) {
-            Some(self.statement()?.into())
+            Some(self.statement()?.to_box())
         } else {
             None
         };
@@ -328,7 +323,9 @@ impl Parser {
         if let Some(equal) = self.tokens.next_if_type(TokenType::Equal) {
             let assign = self.assignment()?;
             if let Expr::Variable(tok) = expr {
-                Ok(Expr::new_assign(tok.name, assign.into()))
+                Ok(Expr::new_assign(tok.name, assign.to_box()))
+            } else if let Expr::Get(tok) = expr {
+                Ok(Expr::new_set(tok.obj, tok.name, assign.to_box()))
             } else {
                 Err(Error::InvalidAssignmentTarget {
                     target: expr,
@@ -344,7 +341,7 @@ impl Parser {
         let mut expr = self.and_expr()?;
         while let Some(op) = self.tokens.next_if_type(TokenType::OR) {
             let rhs = self.and_expr()?;
-            expr = Expr::new_logical(expr.into(), rhs.into(), op);
+            expr = Expr::new_logical(expr.to_box(), rhs.to_box(), op);
         }
         Ok(expr)
     }
@@ -353,7 +350,7 @@ impl Parser {
         let mut expr = self.equality()?;
         while let Some(op) = self.tokens.next_if_type(TokenType::And) {
             let rhs = self.equality()?;
-            expr = Expr::new_logical(expr.into(), rhs.into(), op);
+            expr = Expr::new_logical(expr.to_box(), rhs.to_box(), op);
         }
         Ok(expr)
     }
@@ -367,7 +364,7 @@ impl Parser {
         let mut expr = descent(self)?;
         while let Some(op) = self.tokens.next_if_type_one_of(types) {
             let rhs = descent(self)?;
-            expr = Expr::new_binary(expr.into(), rhs.into(), op);
+            expr = Expr::new_binary(expr.to_box(), rhs.to_box(), op);
         }
         Ok(expr)
     }
@@ -405,7 +402,7 @@ impl Parser {
             .next_if_type_one_of(&[TokenType::Bang, TokenType::Minus])
         {
             let expr = self.unary()?;
-            Ok(Expr::new_unary(op, expr.into()))
+            Ok(Expr::new_unary(op, expr.to_box()))
         } else {
             self.call()
         }
@@ -436,8 +433,8 @@ impl Parser {
                 }
             }
         }
-        self.try_consume(TokenType::RightParen)?;
-        Ok(Expr::new_call(callee.into(), arguments))
+        let right_paren = self.try_consume(TokenType::RightParen)?;
+        Ok(Expr::new_call(callee.to_box(), arguments, right_paren))
     }
 
     fn primary(&mut self) -> Result<Expr> {
@@ -460,7 +457,7 @@ impl Parser {
         if self.tokens.next_if_type_b(TokenType::LeftParen) {
             let expr = self.expression()?;
             self.try_consume(TokenType::RightParen).unwrap();
-            return Ok(Expr::new_grouping(expr.into()));
+            return Ok(Expr::new_grouping(expr.to_box()));
         }
         if let Some(tok) = self.tokens.next_if_type(TokenType::Identifier) {
             return Ok(Expr::new_variable(tok));
@@ -561,6 +558,7 @@ mod test {
             Expr::new_call(
                 Expr::new_variable(Token::new(Identifier, "call", (1, 9).into())).into(),
                 vec![Expr::new_number(1.0), Expr::new_number(2.0)],
+                Token::new(RightParen, ')', (1, 18).into()),
             )
             .into(),
         )];
