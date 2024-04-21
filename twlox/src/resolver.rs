@@ -47,14 +47,26 @@ pub enum FunctionType {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ResolvedEntry {
+    pub pos: crate::Position,
+    pub depth: usize,
+}
+
+impl ResolvedEntry {
+    pub fn new(pos: crate::Position, depth: usize) -> Self {
+        Self { pos, depth }
+    }
+}
+
 pub struct Resolver<'a> {
-    resolve_cb: &'a mut dyn FnMut(crate::Position, usize),
+    resolve_cb: &'a mut dyn FnMut(ResolvedEntry),
     scopes: VecDeque<HashMap<String, bool>>,
     current_func: FunctionType,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(resolve_cb: &'a mut dyn FnMut(crate::Position, usize)) -> Self {
+    pub fn new(resolve_cb: &'a mut dyn FnMut(ResolvedEntry)) -> Self {
         Self {
             resolve_cb,
             scopes: VecDeque::default(),
@@ -89,6 +101,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn declare(&mut self, name: &Token) -> Result<(), Error> {
+        // We do not want to track global variables.
         let Some(scope) = self.scopes.back_mut() else {
             return Ok(());
         };
@@ -100,6 +113,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn define(&mut self, name: &Token) {
+        // We do not want to track global variables.
         let Some(scope) = self.scopes.back_mut() else {
             return;
         };
@@ -107,9 +121,11 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_local(&mut self, name: &Token) {
+        // if variable was found in the current scope, we pass in 0
+        // if it’s in the immediately enclosing scope, 1, etc.
         for (idx, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains_key(name.lexeme()) {
-                (self.resolve_cb)(name.pos(), idx);
+                (self.resolve_cb)(ResolvedEntry::new(name.pos(), idx));
                 return;
             }
         }
@@ -171,7 +187,7 @@ impl<'a> ExprVisitor<Result> for Resolver<'a> {
 
     fn visit_assign(&mut self, expr: &Assign) -> Result {
         expr.value.accept(self)?;
-        expr.value.accept(self)?;
+        self.resolve_local(&expr.name);
         Ok(())
     }
 
@@ -286,5 +302,74 @@ impl<'a> StmtVisitor<Result> for Resolver<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
+    use crate::{parser::Parser, pos, scanner::Scanner};
+
     use super::*;
+
+    struct ResolverCbMock {
+        expected: HashSet<ResolvedEntry>,
+    }
+
+    impl ResolverCbMock {
+        fn new(expected: &[ResolvedEntry]) -> Self {
+            Self {
+                expected: HashSet::from_iter(expected.iter().cloned()),
+            }
+        }
+
+        fn verify(&mut self, got: ResolvedEntry) {
+            assert!(
+                self.expected.remove(&got),
+                "resolved entry {:?} is not expected",
+                got
+            );
+        }
+    }
+
+    impl Drop for ResolverCbMock {
+        fn drop(&mut self) {
+            if !std::thread::panicking() {
+                assert!(
+                    self.expected.is_empty(),
+                    "not all expected entries were resolved: {:#?}",
+                    self.expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn function_with_while_loop() {
+        // Currently we cannot test "for" loop because it desugars to "while" during parsing.
+        let src = r#"// first line
+var a = 0;
+var cnt = 3;
+fun add(a) {
+    var copy_cnt = cnt;
+    while (copy_cnt > 0) {
+        a = a + 1;
+        copy_cnt = --copy_cnt - 1;
+    }
+    a = a + 1;
+}
+add(a); add(a);
+"#;
+        let mut mock = ResolverCbMock::new(&[
+            ResolvedEntry::new(pos(6, 12), 0),
+            ResolvedEntry::new(pos(7, 9), 1),
+            ResolvedEntry::new(pos(7, 13), 1),
+            ResolvedEntry::new(pos(8, 9), 1),
+            ResolvedEntry::new(pos(8, 22), 1),
+            ResolvedEntry::new(pos(10, 5), 0),
+            ResolvedEntry::new(pos(10, 9), 0),
+        ]);
+        let mut cb = |entry| mock.verify(entry);
+
+        let tokens = Scanner::new().scan(src).unwrap();
+        let stmts = Parser::new(tokens).parse().unwrap();
+        let mut resolver = Resolver::new(&mut cb);
+        resolver.resolve_stmts(&stmts).unwrap();
+    }
 }

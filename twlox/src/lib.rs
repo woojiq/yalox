@@ -18,6 +18,10 @@ impl Position {
     }
 }
 
+pub fn pos(row: usize, col: usize) -> Position {
+    Position::new(row, col)
+}
+
 impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.row, self.col)

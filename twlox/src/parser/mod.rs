@@ -506,7 +506,7 @@ mod test {
     use super::*;
 
     use crate::{
-        compare_each,
+        compare_each, pos,
         scanner::{
             token::{Token, TokenType::*},
             Scanner,
@@ -518,7 +518,7 @@ mod test {
         let tokens = Scanner::new().scan("var a = 1;").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_var(
-            Token::new(Identifier, "a", (1, 5).into()),
+            Token::new(Identifier, "a", pos(1, 5)),
             Some(Expr::new_number(1.0)),
         )];
         compare_each(&stmt, &expected);
@@ -529,7 +529,7 @@ mod test {
         let tokens = Scanner::new().scan("{print a;}").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_block(vec![Stmt::new_print(Expr::new_variable(
-            Token::new(Identifier, "a", (1, 8).into()),
+            Token::new(Identifier, "a", pos(1, 8)),
         ))])];
         compare_each(&stmt, &expected);
     }
@@ -540,9 +540,9 @@ mod test {
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_while(
             Expr::new_binary(
-                Expr::new_variable(Token::new(Identifier, "a", (1, 8).into())).into(),
+                Expr::new_variable(Token::new(Identifier, "a", pos(1, 8))).into(),
                 Expr::new_number(2.0).into(),
-                Token::new(Greater, ">", (1, 10).into()),
+                Token::new(Greater, ">", pos(1, 10)),
             ),
             Stmt::new_block(vec![]).into(),
         )];
@@ -554,11 +554,11 @@ mod test {
         let tokens = Scanner::new().scan("var a = call(1, 2);").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_var(
-            Token::new(Identifier, "a", (1, 5).into()),
+            Token::new(Identifier, "a", pos(1, 5)),
             Expr::new_call(
-                Expr::new_variable(Token::new(Identifier, "call", (1, 9).into())).into(),
+                Expr::new_variable(Token::new(Identifier, "call", pos(1, 9))).into(),
                 vec![Expr::new_number(1.0), Expr::new_number(2.0)],
-                Token::new(RightParen, ')', (1, 18).into()),
+                Token::new(RightParen, ')', pos(1, 18)),
             )
             .into(),
         )];
@@ -570,10 +570,10 @@ mod test {
         let tokens = Scanner::new().scan("fun mul(a, b) {}").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_function(
-            Token::new(Identifier, "mul", (1, 5).into()),
+            Token::new(Identifier, "mul", pos(1, 5)),
             vec![
-                Token::new(Identifier, "a", (1, 9).into()),
-                Token::new(Identifier, "b", (1, 12).into()),
+                Token::new(Identifier, "a", pos(1, 9)),
+                Token::new(Identifier, "b", pos(1, 12)),
             ],
             vec![],
         )];
@@ -588,9 +588,9 @@ mod test {
             .unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_class(
-            Token::new(Identifier, "Random", (1, 7).into()),
+            Token::new(Identifier, "Random", pos(1, 7)),
             vec![Function {
-                name: Token::new(Identifier, "method", (1, 15).into()),
+                name: Token::new(Identifier, "method", pos(1, 15)),
                 params: vec![],
                 body: vec![Stmt::new_return(None)],
             }],

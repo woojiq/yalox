@@ -3,8 +3,8 @@ pub mod value;
 
 use crate::{
     ast::{
-        expr::{Expr, ExprVisitor},
-        stmt::{Stmt, StmtVisitor},
+        expr::{self, Expr, ExprVisitor},
+        stmt::{self, Stmt, StmtVisitor},
     },
     scanner::token::{Token, TokenType},
     Position,
@@ -18,11 +18,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::ast::*;
-
 use self::{
     environment::Environment,
-    expr::Set,
     value::{Callable, Function, NativeFunction, PValue, Value},
 };
 
@@ -159,8 +156,8 @@ impl Interpreter {
         self.env.borrow()
     }
 
-    pub fn resolve(&mut self, pos: Position, depth: usize) {
-        self.locals.insert(pos, depth);
+    pub fn resolve(&mut self, entry: crate::resolver::ResolvedEntry) {
+        self.locals.insert(entry.pos, entry.depth);
     }
 
     fn lookup_variable(&self, token: Token) -> Result {
@@ -371,10 +368,10 @@ impl ExprVisitor<Result> for Interpreter {
     fn visit_call(&mut self, expr: &expr::Call) -> Result {
         let callee_rc = self.evaluate(&expr.callee)?;
         let callee = &*callee_rc.borrow();
-        let callable: Box<&dyn Callable> = match callee {
-            Value::Function(f) => Box::new(f),
-            Value::NativeFunction(f) => Box::new(f),
-            Value::Class(f) => Box::new(f),
+        let callable: &dyn Callable = match callee {
+            Value::Function(f) => f as &dyn Callable,
+            Value::NativeFunction(f) => f as &dyn Callable,
+            Value::Class(f) => f as &dyn Callable,
             _ => unreachable!(),
         };
 
@@ -406,7 +403,7 @@ impl ExprVisitor<Result> for Interpreter {
         }
     }
 
-    fn visit_set(&mut self, expr: &Set) -> Result {
+    fn visit_set(&mut self, expr: &expr::Set) -> Result {
         let obj_rc = self.evaluate(&expr.obj)?;
         let mut obj = obj_rc.borrow_mut();
         let Value::Instance(val) = &mut *obj else {

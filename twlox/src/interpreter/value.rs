@@ -92,11 +92,9 @@ impl Callable for Function {
     fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
         let env = Rc::new(RefCell::new(Environment::new(self.closure.clone())));
         let mut env_mut = env.borrow_mut();
-        // println!("{}", *env_mut);
         for (param, arg) in self.declaration.params.iter().zip(args) {
             env_mut.define(param.lexeme(), arg);
         }
-        // println!("{}", *env_mut);
         drop(env_mut);
         match interpreter.execute_block(&self.declaration.body, env) {
             Ok(_) => Ok(Value::Nil.to_rc()),

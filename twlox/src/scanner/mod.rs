@@ -221,7 +221,10 @@ impl Scanner {
     }
 
     fn scan_word(&self, chars: &mut Chars) -> Token {
-        while chars.next_if(|ch| ch.is_alphanumeric()).is_some() {}
+        while chars
+            .next_if(|ch| ch.is_alphanumeric() || ch == &'_')
+            .is_some()
+        {}
 
         let lexeme = chars.substr_around();
         let type_ = token::get_keyword(&lexeme).unwrap_or(TokenType::Identifier);
@@ -237,7 +240,7 @@ impl Default for Scanner {
 
 #[cfg(test)]
 mod test {
-    use crate::compare_each;
+    use crate::{compare_each, pos};
 
     use super::*;
 
@@ -296,11 +299,11 @@ mod test {
     fn single_line_correct() {
         let tokens = Scanner::default().scan("var a = 1;").unwrap();
         let expected = [
-            Token::new(TokenType::Var, "var", (1, 1).into()),
-            Token::new(TokenType::Identifier, "a", (1, 5).into()),
-            Token::new(TokenType::Equal, "=", (1, 7).into()),
-            Token::new(TokenType::Number, "1", (1, 9).into()),
-            Token::new(TokenType::Semicolon, ";", (1, 10).into()),
+            Token::new(TokenType::Var, "var", pos(1, 1)),
+            Token::new(TokenType::Identifier, "a", pos(1, 5)),
+            Token::new(TokenType::Equal, "=", pos(1, 7)),
+            Token::new(TokenType::Number, "1", pos(1, 9)),
+            Token::new(TokenType::Semicolon, ";", pos(1, 10)),
         ];
         compare_each(&tokens, &expected)
     }
@@ -330,13 +333,13 @@ mod test {
     fn math_lexemes() {
         let tokens = Scanner::default().scan("(+*/{})").unwrap();
         let expected = [
-            Token::new(TokenType::LeftParen, '(', (1, 1).into()),
-            Token::new(TokenType::Plus, '+', (1, 2).into()),
-            Token::new(TokenType::Star, '*', (1, 3).into()),
-            Token::new(TokenType::Slash, '/', (1, 4).into()),
-            Token::new(TokenType::LeftBrace, '{', (1, 5).into()),
-            Token::new(TokenType::RightBrace, '}', (1, 6).into()),
-            Token::new(TokenType::RightParen, ')', (1, 7).into()),
+            Token::new(TokenType::LeftParen, '(', pos(1, 1)),
+            Token::new(TokenType::Plus, '+', pos(1, 2)),
+            Token::new(TokenType::Star, '*', pos(1, 3)),
+            Token::new(TokenType::Slash, '/', pos(1, 4)),
+            Token::new(TokenType::LeftBrace, '{', pos(1, 5)),
+            Token::new(TokenType::RightBrace, '}', pos(1, 6)),
+            Token::new(TokenType::RightParen, ')', pos(1, 7)),
         ];
         compare_each(&tokens, &expected);
     }
@@ -345,13 +348,13 @@ mod test {
     fn operation_lexemes() {
         let tokens = Scanner::default().scan("+= == ! =/ <=").unwrap();
         let expected = [
-            Token::new(TokenType::Plus, '+', (1, 1).into()),
-            Token::new(TokenType::Equal, '=', (1, 2).into()),
-            Token::new(TokenType::EqualEqual, "==", (1, 4).into()),
-            Token::new(TokenType::Bang, '!', (1, 7).into()),
-            Token::new(TokenType::Equal, '=', (1, 9).into()),
-            Token::new(TokenType::Slash, '/', (1, 10).into()),
-            Token::new(TokenType::LessEqual, "<=", (1, 12).into()),
+            Token::new(TokenType::Plus, '+', pos(1, 1)),
+            Token::new(TokenType::Equal, '=', pos(1, 2)),
+            Token::new(TokenType::EqualEqual, "==", pos(1, 4)),
+            Token::new(TokenType::Bang, '!', pos(1, 7)),
+            Token::new(TokenType::Equal, '=', pos(1, 9)),
+            Token::new(TokenType::Slash, '/', pos(1, 10)),
+            Token::new(TokenType::LessEqual, "<=", pos(1, 12)),
         ];
         compare_each(&tokens, &expected);
     }
@@ -361,19 +364,19 @@ mod test {
         let errors = Scanner::default().scan("[]\n\n  ^\n 😃").err().unwrap();
         let expected = [
             Error::UnexpectedChar {
-                position: (1, 1).into(),
+                position: pos(1, 1),
                 character: '[',
             },
             Error::UnexpectedChar {
-                position: (1, 2).into(),
+                position: pos(1, 2),
                 character: ']',
             },
             Error::UnexpectedChar {
-                position: (3, 3).into(),
+                position: pos(3, 3),
                 character: '^',
             },
             Error::UnexpectedChar {
-                position: (4, 2).into(),
+                position: pos(4, 2),
                 character: '😃',
             },
         ];
@@ -401,9 +404,30 @@ mod test {
     fn position_with_emoji() {
         let tokens = Scanner::default().scan(r#""🚁 😃"+or"#).unwrap();
         let expected = [
-            Token::new(TokenType::String, "🚁 😃", (1, 1).into()),
-            Token::new(TokenType::Plus, '+', (1, 6).into()),
-            Token::new(TokenType::OR, "or", (1, 7).into()),
+            Token::new(TokenType::String, "🚁 😃", pos(1, 1)),
+            Token::new(TokenType::Plus, '+', pos(1, 6)),
+            Token::new(TokenType::OR, "or", pos(1, 7)),
+        ];
+        compare_each(&tokens, &expected);
+    }
+
+    #[test]
+    fn variables() {
+        let tokens = Scanner::default()
+            .scan(
+                r#"
+var var_with_underscore;
+var var_with_numbers123;
+                "#,
+            )
+            .unwrap();
+        let expected = [
+            Token::new(TokenType::Var, "var", pos(2, 1)),
+            Token::new(TokenType::Identifier, "var_with_underscore", pos(2, 5)),
+            Token::new(TokenType::Semicolon, ";", pos(2, 24)),
+            Token::new(TokenType::Var, "var", pos(3, 1)),
+            Token::new(TokenType::Identifier, "var_with_numbers123", pos(3, 5)),
+            Token::new(TokenType::Semicolon, ";", pos(3, 24)),
         ];
         compare_each(&tokens, &expected);
     }

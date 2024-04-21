@@ -92,7 +92,7 @@ impl Runner {
         let mut parser = Parser::new(tokens);
         let statements = parser.parse().map_err(Error::Parser)?;
 
-        let mut callback = |pos, dep| self.interpreter.resolve(pos, dep);
+        let mut callback = |entry| self.interpreter.resolve(entry);
         let mut resolver = Resolver::new(&mut callback);
         resolver
             .resolve_stmts(&statements)
@@ -116,6 +116,7 @@ mod test {
 
     use super::Runner;
 
+    // TODO: Move to integration tests.
     #[test]
     fn condition() {
         let src = "var a = 0; if (2/1 > (3-4)*1) {a = 1;} else {a = 2;}";
@@ -169,18 +170,18 @@ print b;
     fn class() {
         let src = "\
 var v = 0;
-var v2 = 0;
 class Bacon {
     eat(v) {
         v = v + 1;
     }
 }
+var v2 = 0;
 Bacon().eat(v); Bacon().eat(v2); Bacon().eat(v);
 ";
         let mut runner = Runner::new();
         runner.run(src).unwrap();
         let env = runner.interpreter.env();
         assert_eq!(env.get("v"), Some(Value::Num(2.0).to_rc()));
-        assert_eq!(env.get("v"), Some(Value::Num(1.0).to_rc()));
+        assert_eq!(env.get("v2"), Some(Value::Num(1.0).to_rc()));
     }
 }

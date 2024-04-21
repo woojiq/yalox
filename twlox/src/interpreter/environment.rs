@@ -50,8 +50,9 @@ impl Environment {
     }
 
     pub fn assign<T: Into<PValue>>(&mut self, name: &str, value: T) -> Result {
+        let value: PValue = value.into();
         if let Some(v) = self.values.get_mut(name) {
-            *v = value.into();
+            *v.borrow_mut() = value.borrow().clone();
             Ok(())
         } else if self
             .enclosing
@@ -65,9 +66,10 @@ impl Environment {
     }
 
     pub fn assign_at<T: Into<PValue>>(&mut self, name: &str, value: T, depth: usize) -> Result {
+        let value: PValue = value.into();
         if depth == 0 {
-            if self.values.contains_key(name) {
-                self.values.insert(name.to_string(), value.into());
+            if let Some(val) = self.values.get_mut(name) {
+                *val.borrow_mut() = value.borrow().clone();
                 return Ok(());
             } else {
                 return Err(Error::VarNotFound);
@@ -149,6 +151,21 @@ mod test {
         *value.borrow_mut() = true.into();
         assert_eq!(env.get("first"), Some(Value::from(!raw).to_rc()));
         assert_eq!(env.get("link_first"), Some(Value::from(!raw).to_rc()));
+    }
+
+    #[test]
+    fn assign_changes_not_replaces() {
+        let mut env = Environment::default();
+        let field = "a";
+        let value = Value::from("original").to_rc();
+        env.define(field, value.clone());
+
+        env.assign(field, Value::from("changed").to_rc()).unwrap();
+        assert_eq!(*value.borrow(), Value::from("changed"));
+
+        env.assign_at(field, Value::from("changed2").to_rc(), 0)
+            .unwrap();
+        assert_eq!(*value.borrow(), Value::from("changed2"));
     }
 
     #[test]
