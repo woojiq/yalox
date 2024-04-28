@@ -6,13 +6,13 @@ use std::{
 
 use crate::{
     interpreter,
+    interpreter::Interpreter,
     parser::{self, Parser},
+    resolver,
     resolver::Resolver,
     scanner,
+    scanner::Scanner,
 };
-use crate::{resolver, scanner::Scanner};
-
-use crate::interpreter::Interpreter;
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -50,9 +50,7 @@ pub struct Runner {
 
 impl Runner {
     pub fn new() -> Self {
-        Self {
-            interpreter: Interpreter::new(),
-        }
+        Self { interpreter: Interpreter::new() }
     }
 
     pub fn run_file(&mut self, path: &Path) {
@@ -94,13 +92,9 @@ impl Runner {
 
         let mut callback = |entry| self.interpreter.resolve(entry);
         let mut resolver = Resolver::new(&mut callback);
-        resolver
-            .resolve_stmts(&statements)
-            .map_err(Error::Resolver)?;
+        resolver.resolve_stmts(&statements).map_err(Error::Resolver)?;
 
-        self.interpreter
-            .interpret(&statements)
-            .map_err(|e| Error::Interpreter(vec![e]))
+        self.interpreter.interpret(&statements).map_err(|e| Error::Interpreter(vec![e]))
     }
 }
 
@@ -112,9 +106,8 @@ impl Default for Runner {
 
 #[cfg(test)]
 mod test {
-    use crate::interpreter::value::Value;
-
     use super::Runner;
+    use crate::interpreter::value::Value;
 
     // TODO: Move to integration tests.
     #[test]

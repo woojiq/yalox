@@ -1,10 +1,9 @@
-/**
-    Generates boilerplate code for AST. It includes: Visitor trait, accept method,
-    enum, and a separate structure for each enum variant.
-
-    For a better understanding, see where this macro is already used.
-    All meta information (e.g. derive) that the enum has will be propagated to all structures.
-*/
+/// Generates boilerplate code for AST. It includes: Visitor trait, accept
+/// method, enum, and a separate structure for each enum variant.
+///
+/// For a better understanding, see where this macro is already used. All
+/// meta information (e.g. derive) that the enum has will be propagated to all
+/// structures.
 macro_rules! ast {
     // Matches full enum with meta information.
     (
@@ -46,9 +45,8 @@ macro_rules! ast {
     }};
 }
 
-/**
-    Helper macro to [`ast!`]. It is responsible for creating an enum or struct and constructor method.
-*/
+/// Helper macro to [`ast!`]. It is responsible for creating an enum or struct
+/// and constructor method.
 macro_rules! ast_helper {
     (
         $enum_name:ident
@@ -91,9 +89,8 @@ macro_rules! ast_helper {
 }
 
 pub mod stmt {
-    use crate::scanner::token::Token;
-
     use super::expr::Expr;
+    use crate::scanner::token::Token;
 
     ast! {
         #[derive(Debug, Clone, PartialEq)]
@@ -221,13 +218,21 @@ pub mod expr {
                     write!(f, ")")
                 }
                 Expr::Unary(u) => write!(f, "{}{}", u.op.lexeme(), u.inner),
-                Expr::Logical(l) => write!(f, "{} {} {}", l.left, l.op.lexeme(), l.right),
+                Expr::Logical(l) => {
+                    write!(f, "{} {} {}", l.left, l.op.lexeme(), l.right)
+                }
                 Expr::Grouping(g) => write!(f, "({})", g.inner),
-                Expr::Binary(b) => write!(f, "{} {} {}", b.left, b.op.lexeme(), b.right),
-                Expr::Assign(a) => write!(f, "{} = {}", a.name.lexeme(), a.value),
+                Expr::Binary(b) => {
+                    write!(f, "{} {} {}", b.left, b.op.lexeme(), b.right)
+                }
+                Expr::Assign(a) => {
+                    write!(f, "{} = {}", a.name.lexeme(), a.value)
+                }
                 Expr::Variable(v) => v.name.lexeme().fmt(f),
                 Expr::Get(g) => write!(f, "{}.{}", g.obj, g.name.lexeme()),
-                Expr::Set(s) => write!(f, "{}.{} = {}", s.obj, s.name.lexeme(), s.value),
+                Expr::Set(s) => {
+                    write!(f, "{}.{} = {}", s.obj, s.name.lexeme(), s.value)
+                }
                 Expr::This(t) => write!(f, "{}", t.keyword.lexeme()),
             }
         }
@@ -244,12 +249,15 @@ pub mod expr {
         pub fn new_number(value: f64) -> Self {
             Self::Literal(Literal::Number(value))
         }
+
         pub fn new_string(value: String) -> Self {
             Self::Literal(Literal::String(value))
         }
+
         pub fn new_bool(value: bool) -> Self {
             Self::Literal(Literal::Bool(value))
         }
+
         pub fn new_nil() -> Self {
             Self::Literal(Literal::Nil)
         }

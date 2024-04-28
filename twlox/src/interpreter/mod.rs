@@ -3,6 +3,18 @@
 pub mod environment;
 pub mod value;
 
+use std::{
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    fmt,
+    rc::Rc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use self::{
+    environment::Environment,
+    value::{Callable, Function, NativeFunction, PValue, Value},
+};
 use crate::{
     ast::{
         expr::{self, Expr, ExprVisitor},
@@ -12,44 +24,15 @@ use crate::{
     Position,
 };
 
-use core::fmt;
-use std::{
-    cell::{Ref, RefCell},
-    collections::HashMap,
-    rc::Rc,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use self::{
-    environment::Environment,
-    value::{Callable, Function, NativeFunction, PValue, Value},
-};
-
 #[derive(Debug, Clone)]
 pub enum Error {
-    UndefinedVariable {
-        tok: Token,
-    },
-    UndefinedProperty {
-        tok: Token,
-    },
-    Arity {
-        tok: Token,
-    },
-    ConditionExpected {
-        stmt: stmt::If,
-    },
-    PropertyNotOnObj {
-        property: Token,
-    },
-    InvalidOperand {
-        op: Token,
-        expected: &'static str,
-        found: Value,
-    },
-    DivisionByZero {
-        op: Token,
-    },
+    UndefinedVariable { tok: Token },
+    UndefinedProperty { tok: Token },
+    Arity { tok: Token },
+    ConditionExpected { stmt: stmt::If },
+    PropertyNotOnObj { property: Token },
+    InvalidOperand { op: Token, expected: &'static str, found: Value },
+    DivisionByZero { op: Token },
 
     // === Not exactly Errors === //
     Return(PValue),
@@ -74,11 +57,7 @@ impl fmt::Display for Error {
             Error::UndefinedProperty { tok } => {
                 write!(f, "undefined property {} at {}", tok.lexeme(), tok.pos())
             }
-            Error::InvalidOperand {
-                op,
-                expected,
-                found,
-            } => {
+            Error::InvalidOperand { op, expected, found } => {
                 write!(
                     f,
                     "'{}' expected {}, found {} at {}",
@@ -88,7 +67,9 @@ impl fmt::Display for Error {
                     op.pos()
                 )
             }
-            Error::DivisionByZero { op } => write!(f, "division by zero at {}", op.pos()),
+            Error::DivisionByZero { op } => {
+                write!(f, "division by zero at {}", op.pos())
+            }
         }
     }
 }
@@ -109,22 +90,13 @@ impl Interpreter {
                 name: "clock".to_string(),
                 arity: 0,
                 fun: |_, _| {
-                    Value::Num(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs_f64(),
-                    )
+                    Value::Num(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64())
                 },
             })
             .to_rc(),
         );
 
-        Self {
-            env: globals.clone(),
-            globals,
-            locals: HashMap::default(),
-        }
+        Self { env: globals.clone(), globals, locals: HashMap::default() }
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<()> {
@@ -234,9 +206,9 @@ impl ExprVisitor<Result> for Interpreter {
                 }),
             },
             TokenType::Slash => match (lhs, rhs) {
-                (Value::Num(_), Value::Num(r)) if *r == 0.0 => Err(Error::DivisionByZero {
-                    op: expr.op.clone(),
-                }),
+                (Value::Num(_), Value::Num(r)) if *r == 0.0 => {
+                    Err(Error::DivisionByZero { op: expr.op.clone() })
+                }
                 (Value::Num(l), Value::Num(r)) => Ok(Value::Num(l / r).to_rc()),
                 (v, _) => Err(Error::InvalidOperand {
                     op: expr.op.clone(),
@@ -357,19 +329,15 @@ impl ExprVisitor<Result> for Interpreter {
     fn visit_assign(&mut self, expr: &expr::Assign) -> Result {
         let value = self.evaluate(&expr.value)?;
         let status = if let Some(&depth) = self.locals.get(&expr.name.pos()) {
-            self.env
-                .borrow_mut()
-                .assign_at(expr.name.lexeme(), value.clone(), depth)
+            self.env.borrow_mut().assign_at(expr.name.lexeme(), value.clone(), depth)
         } else {
-            self.env
-                .borrow_mut()
-                .assign(expr.name.lexeme(), value.clone())
+            self.env.borrow_mut().assign(expr.name.lexeme(), value.clone())
         };
         match status {
             Ok(()) => Ok(value),
-            Err(environment::Error::VarNotFound) => Err(Error::UndefinedVariable {
-                tok: expr.name.clone(),
-            }),
+            Err(environment::Error::VarNotFound) => {
+                Err(Error::UndefinedVariable { tok: expr.name.clone() })
+            }
         }
     }
 
@@ -392,16 +360,10 @@ impl ExprVisitor<Result> for Interpreter {
             _ => unreachable!(),
         };
 
-        let args = expr
-            .arguments
-            .iter()
-            .map(|a| self.evaluate(a))
-            .collect::<Result<Vec<_>>>()?;
+        let args = expr.arguments.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<_>>>()?;
 
         if args.len() != callable.arity() {
-            return Err(Error::Arity {
-                tok: expr.closing_paren.clone(),
-            });
+            return Err(Error::Arity { tok: expr.closing_paren.clone() });
         }
         callable.call(self, args)
     }
@@ -416,25 +378,19 @@ impl ExprVisitor<Result> for Interpreter {
             }
             if let Some(method) = val.class.methods.get(name) {
                 return Ok(
-                    Value::Function(self.bind_this(&method.borrow(), obj_rc.clone())).to_rc(),
+                    Value::Function(self.bind_this(&method.borrow(), obj_rc.clone())).to_rc()
                 );
             }
-            Err(Error::UndefinedProperty {
-                tok: expr.name.clone(),
-            })
+            Err(Error::UndefinedProperty { tok: expr.name.clone() })
         } else {
-            Err(Error::PropertyNotOnObj {
-                property: expr.name.clone(),
-            })
+            Err(Error::PropertyNotOnObj { property: expr.name.clone() })
         }
     }
 
     fn visit_set(&mut self, expr: &expr::Set) -> Result {
         let obj_rc = self.evaluate(&expr.obj)?;
         if !matches!(*obj_rc.borrow(), Value::Instance(_)) {
-            return Err(Error::PropertyNotOnObj {
-                property: expr.name.clone(),
-            });
+            return Err(Error::PropertyNotOnObj { property: expr.name.clone() });
         }
         let value = self.evaluate(&expr.value)?;
         let mut obj = obj_rc.borrow_mut();
@@ -460,9 +416,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
     }
 
     fn visit_class(&mut self, stmt: &stmt::Class) -> Result<()> {
-        self.env
-            .borrow_mut()
-            .define(stmt.name.lexeme(), Value::Nil.to_rc());
+        self.env.borrow_mut().define(stmt.name.lexeme(), Value::Nil.to_rc());
         let mut methods = HashMap::default();
         for method in &stmt.methods {
             let func = Function {
@@ -470,21 +424,13 @@ impl StmtVisitor<Result<()>> for Interpreter {
                 closure: self.env.clone(),
                 is_init: method.name.lexeme() == "init",
             };
-            methods.insert(
-                method.name.lexeme().to_string(),
-                Rc::new(RefCell::new(func)),
-            );
+            methods.insert(method.name.lexeme().to_string(), Rc::new(RefCell::new(func)));
         }
-        let class = Value::Class(value::Class {
-            name: stmt.name.clone(),
-            methods,
-        });
+        let class = Value::Class(value::Class { name: stmt.name.clone(), methods });
         self.env
             .borrow_mut()
             .assign(stmt.name.lexeme(), class.to_rc())
-            .map_err(|_| Error::UndefinedVariable {
-                tok: stmt.name.clone(),
-            })
+            .map_err(|_| Error::UndefinedVariable { tok: stmt.name.clone() })
     }
 
     fn visit_expression(&mut self, stmt: &stmt::Expression) -> Result<()> {
@@ -497,9 +443,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
             closure: self.env.clone(),
             is_init: false,
         });
-        self.env
-            .borrow_mut()
-            .define(stmt.name.lexeme(), function.to_rc());
+        self.env.borrow_mut().define(stmt.name.lexeme(), function.to_rc());
         Ok(())
     }
 
@@ -527,11 +471,8 @@ impl StmtVisitor<Result<()>> for Interpreter {
     }
 
     fn visit_return(&mut self, stmt: &stmt::Return) -> Result<()> {
-        let value = if let Some(value) = &stmt.value {
-            self.evaluate(value)?
-        } else {
-            Value::Nil.to_rc()
-        };
+        let value =
+            if let Some(value) = &stmt.value { self.evaluate(value)? } else { Value::Nil.to_rc() };
         Err(Error::Return(value))
     }
 

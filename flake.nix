@@ -13,19 +13,24 @@
     flake-utils.lib.eachDefaultSystem (
       system: let
         pkgs = nixpkgs.legacyPackages.${system}.extend (import rust-overlay);
+        rust-nightly = pkgs.rust-bin.nightly."2024-04-28";
       in {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             # Rust
+            (lib.hiPrio rust-nightly.rustfmt)
+            (lib.hiPrio rust-nightly.rust-analyzer)
             rust-bin.stable.latest.default
-            rust-analyzer
             gdb
             cargo-tarpaulin
           ];
         };
         devShells.nightly = pkgs.mkShell {
-          packages = with pkgs; [
-            rust-bin.nightly."2024-02-01".default
+          packages = [
+            (rust-nightly.default.override
+              {
+                extensions = ["rust-src" "miri-preview"];
+              })
           ];
         };
       }

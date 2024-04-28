@@ -9,11 +9,7 @@ pub struct Token {
 
 impl Token {
     pub fn new<S: ToString>(type_: TokenType, lexeme: S, start_position: Position) -> Self {
-        Self {
-            type_,
-            lexeme: lexeme.to_string(),
-            start_position,
-        }
+        Self { type_, lexeme: lexeme.to_string(), start_position }
     }
 
     pub fn get_type(&self) -> TokenType {

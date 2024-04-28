@@ -8,18 +8,9 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Error {
-    General {
-        msg: String,
-        location: Position,
-    },
-    InvalidAssignmentTarget {
-        target: Expr,
-        location: Position,
-    },
-    UnexpectedTokenType {
-        expected: TokenType,
-        found: Option<Token>,
-    },
+    General { msg: String, location: Position },
+    InvalidAssignmentTarget { target: Expr, location: Position },
+    UnexpectedTokenType { expected: TokenType, found: Option<Token> },
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -33,20 +24,18 @@ impl Display for Error {
             Error::InvalidAssignmentTarget { target, location } => {
                 write!(f, "Invalid assignment target at {location}: {target}",)
             }
-            Error::UnexpectedTokenType {
-                expected,
-                found: Some(found),
-            } => write!(
-                f,
-                "expected token type {:?} found {} at {}",
-                expected,
-                found.lexeme(),
-                found.pos()
-            ),
-            Error::UnexpectedTokenType {
-                expected,
-                found: None,
-            } => write!(f, "expected token type {:?} found EOF", expected,),
+            Error::UnexpectedTokenType { expected, found: Some(found) } => {
+                write!(
+                    f,
+                    "expected token type {:?} found {} at {}",
+                    expected,
+                    found.lexeme(),
+                    found.pos()
+                )
+            }
+            Error::UnexpectedTokenType { expected, found: None } => {
+                write!(f, "expected token type {:?} found EOF", expected,)
+            }
         }
     }
 }
@@ -70,7 +59,8 @@ impl Tokens {
 
     /// Consumes the next token if it matches [`TokenType`].
     ///
-    /// If you want to advance the iterator and get [`Token`] instead of [`bool`], use [`Tokens::next_if()`].
+    /// If you want to advance the iterator and get [`Token`] instead of
+    /// [`bool`], use [`Tokens::next_if()`].
     pub fn next_if_type(&mut self, type_: TokenType) -> Option<Token> {
         self.next_if(|t| t.get_type() == type_)
     }
@@ -82,7 +72,8 @@ impl Tokens {
 
     /// Consumes the next token if it matches any of provided [`TokenType`]s.
     ///
-    /// If you want to advance the iterator and get [`Token`] instead of [`bool`], use [`Tokens::next_if()`].
+    /// If you want to advance the iterator and get [`Token`] instead of
+    /// [`bool`], use [`Tokens::next_if()`].
     pub fn next_if_type_one_of(&mut self, types: &[TokenType]) -> Option<Token> {
         self.next_if(|lhs| {
             let lhs = lhs.get_type();
@@ -112,11 +103,7 @@ impl MultiPeekable for Tokens {
 
 impl From<Vec<Token>> for Tokens {
     fn from(value: Vec<Token>) -> Self {
-        Self {
-            inner: value,
-            idx: 0,
-            location: Position::new(1, 1),
-        }
+        Self { inner: value, idx: 0, location: Position::new(1, 1) }
     }
 }
 
@@ -126,9 +113,7 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self {
-            tokens: Tokens::from(tokens),
-        }
+        Self { tokens: Tokens::from(tokens) }
     }
 
     pub fn parse(&mut self) -> std::result::Result<Vec<Stmt>, Vec<Error>> {
@@ -222,11 +207,8 @@ impl Parser {
     }
 
     fn return_statement(&mut self) -> Result<Stmt> {
-        let value = if self.tokens.is_type(TokenType::Semicolon) {
-            None
-        } else {
-            Some(self.expression()?)
-        };
+        let value =
+            if self.tokens.is_type(TokenType::Semicolon) { None } else { Some(self.expression()?) };
         self.try_consume(TokenType::Semicolon)?;
         Ok(Stmt::new_return(value))
     }
@@ -327,10 +309,7 @@ impl Parser {
             } else if let Expr::Get(tok) = expr {
                 Ok(Expr::new_set(tok.obj, tok.name, assign.to_box()))
             } else {
-                Err(Error::InvalidAssignmentTarget {
-                    target: expr,
-                    location: equal.pos(),
-                })
+                Err(Error::InvalidAssignmentTarget { target: expr, location: equal.pos() })
             }
         } else {
             Ok(expr)
@@ -378,12 +357,7 @@ impl Parser {
 
     fn comparison(&mut self) -> Result<Expr> {
         self.binary_op_parser_helper(
-            &[
-                TokenType::Greater,
-                TokenType::GreaterEqual,
-                TokenType::Less,
-                TokenType::LessEqual,
-            ],
+            &[TokenType::Greater, TokenType::GreaterEqual, TokenType::Less, TokenType::LessEqual],
             Self::term,
         )
     }
@@ -397,10 +371,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr> {
-        if let Some(op) = self
-            .tokens
-            .next_if_type_one_of(&[TokenType::Bang, TokenType::Minus])
-        {
+        if let Some(op) = self.tokens.next_if_type_one_of(&[TokenType::Bang, TokenType::Minus]) {
             let expr = self.unary()?;
             Ok(Expr::new_unary(op, expr.to_box()))
         } else {
@@ -465,10 +436,7 @@ impl Parser {
         if let Some(tok) = self.tokens.next_if_type(TokenType::This) {
             return Ok(Expr::new_this(tok));
         }
-        Err(Error::General {
-            msg: "primary expression".into(),
-            location: self.tokens.location(),
-        })
+        Err(Error::General { msg: "primary expression".into(), location: self.tokens.location() })
     }
 
     fn synchronize(&mut self) {
@@ -495,19 +463,16 @@ impl Parser {
     }
 
     fn try_consume(&mut self, type_: TokenType) -> Result<Token> {
-        self.tokens
-            .next_if(|t| t.get_type() == type_)
-            .ok_or(Error::UnexpectedTokenType {
-                expected: type_,
-                found: self.tokens.peek().cloned(),
-            })
+        self.tokens.next_if(|t| t.get_type() == type_).ok_or(Error::UnexpectedTokenType {
+            expected: type_,
+            found: self.tokens.peek().cloned(),
+        })
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
     use crate::{
         compare_each, pos,
         scanner::{
@@ -520,10 +485,8 @@ mod test {
     fn variable() {
         let tokens = Scanner::new().scan("var a = 1;").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
-        let expected = [Stmt::new_var(
-            Token::new(Identifier, "a", pos(1, 5)),
-            Some(Expr::new_number(1.0)),
-        )];
+        let expected =
+            [Stmt::new_var(Token::new(Identifier, "a", pos(1, 5)), Some(Expr::new_number(1.0)))];
         compare_each(&stmt, &expected);
     }
 
@@ -531,9 +494,11 @@ mod test {
     fn block() {
         let tokens = Scanner::new().scan("{print a;}").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
-        let expected = [Stmt::new_block(vec![Stmt::new_print(Expr::new_variable(
-            Token::new(Identifier, "a", pos(1, 8)),
-        ))])];
+        let expected = [Stmt::new_block(vec![Stmt::new_print(Expr::new_variable(Token::new(
+            Identifier,
+            "a",
+            pos(1, 8),
+        )))])];
         compare_each(&stmt, &expected);
     }
 
@@ -574,10 +539,7 @@ mod test {
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_function(
             Token::new(Identifier, "mul", pos(1, 5)),
-            vec![
-                Token::new(Identifier, "a", pos(1, 9)),
-                Token::new(Identifier, "b", pos(1, 12)),
-            ],
+            vec![Token::new(Identifier, "a", pos(1, 9)), Token::new(Identifier, "b", pos(1, 12))],
             vec![],
         )];
 
@@ -586,9 +548,7 @@ mod test {
 
     #[test]
     fn class_declaration() {
-        let tokens = Scanner::new()
-            .scan("class Random {method() {return this;}}")
-            .unwrap();
+        let tokens = Scanner::new().scan("class Random {method() {return this;}}").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_class(
             Token::new(Identifier, "Random", pos(1, 7)),

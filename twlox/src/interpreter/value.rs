@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
-use crate::{ast::stmt, scanner::token::Token};
-
 use super::{environment::Environment, Error, Interpreter, Result};
+use crate::{ast::stmt, scanner::token::Token};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -65,10 +64,14 @@ impl fmt::Display for Value {
             Value::Num(v) => write!(f, "{v}"),
             Value::Str(v) => write!(f, "{v}"),
             Value::Nil => write!(f, "nil"),
-            Value::Function(v) => write!(f, "<fun>{}", v.declaration.name.lexeme()),
+            Value::Function(v) => {
+                write!(f, "<fun>{}", v.declaration.name.lexeme())
+            }
             Value::NativeFunction(v) => write!(f, "<fun>{}", v.name),
             Value::Class(v) => write!(f, "<class>{}", v.name.lexeme()),
-            Value::Instance(v) => write!(f, "<instance>{}", v.class.name.lexeme()),
+            Value::Instance(v) => {
+                write!(f, "<instance>{}", v.class.name.lexeme())
+            }
         }
     }
 }
@@ -166,11 +169,8 @@ impl Callable for Class {
     }
 
     fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
-        let instance = Value::Instance(Instance {
-            class: self.clone(),
-            fields: HashMap::default(),
-        })
-        .to_rc();
+        let instance =
+            Value::Instance(Instance { class: self.clone(), fields: HashMap::default() }).to_rc();
         // TODO: Add find_method method.
         if let Some(init) = self.methods.get("init") {
             interpreter

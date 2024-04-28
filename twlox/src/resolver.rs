@@ -35,15 +35,15 @@ impl fmt::Display for Error {
                 name.lexeme(),
                 name.pos()
             ),
-            Error::GlobalReturn => write!(f, "Return is disallowed in global scope."),
+            Error::GlobalReturn => {
+                write!(f, "Return is disallowed in global scope.")
+            }
             Error::ReturnInInitializer => {
                 write!(f, "\"return\" keyword is disallowed in initializers")
             }
-            Error::ThisNotInClass { name } => write!(
-                f,
-                "\"this\" keyword at {} is allowed only in classes",
-                name.pos()
-            ),
+            Error::ThisNotInClass { name } => {
+                write!(f, "\"this\" keyword at {} is allowed only in classes", name.pos())
+            }
         }
     }
 }
@@ -211,14 +211,8 @@ impl<'a> ExprVisitor<Result> for Resolver<'a> {
     }
 
     fn visit_variable(&mut self, expr: &Variable) -> Result {
-        if self
-            .scopes
-            .back()
-            .is_some_and(|s| s.get(expr.name.lexeme()).is_some_and(|b| !*b))
-        {
-            Err(vec![Error::ReadInInit {
-                name: expr.name.clone(),
-            }])
+        if self.scopes.back().is_some_and(|s| s.get(expr.name.lexeme()).is_some_and(|b| !*b)) {
+            Err(vec![Error::ReadInInit { name: expr.name.clone() }])
         } else {
             self.resolve_local(&expr.name);
             Ok(())
@@ -240,9 +234,7 @@ impl<'a> ExprVisitor<Result> for Resolver<'a> {
                 self.resolve_local(&expr.keyword);
                 Ok(())
             }
-            ClassType::None => Err(vec![Error::ThisNotInClass {
-                name: expr.keyword.clone(),
-            }]),
+            ClassType::None => Err(vec![Error::ThisNotInClass { name: expr.keyword.clone() }]),
         }
     }
 }
@@ -263,10 +255,7 @@ impl<'a> StmtVisitor<Result> for Resolver<'a> {
         }
         self.define(&stmt.name);
         self.begin_scope();
-        self.scopes
-            .back_mut()
-            .unwrap()
-            .insert("this".to_string(), true);
+        self.scopes.back_mut().unwrap().insert("this".to_string(), true);
         for method in &stmt.methods {
             self.resolve_func(
                 method,
@@ -354,9 +343,8 @@ impl<'a> StmtVisitor<Result> for Resolver<'a> {
 mod test {
     use std::collections::HashSet;
 
-    use crate::{parser::Parser, pos, scanner::Scanner};
-
     use super::*;
+    use crate::{parser::Parser, pos, scanner::Scanner};
 
     struct ResolverCbMock {
         expected: HashSet<ResolvedEntry>,
@@ -364,17 +352,11 @@ mod test {
 
     impl ResolverCbMock {
         fn new(expected: &[ResolvedEntry]) -> Self {
-            Self {
-                expected: HashSet::from_iter(expected.iter().cloned()),
-            }
+            Self { expected: HashSet::from_iter(expected.iter().cloned()) }
         }
 
         fn verify(&mut self, got: ResolvedEntry) {
-            assert!(
-                self.expected.remove(&got),
-                "resolved entry {:?} is not expected",
-                got
-            );
+            assert!(self.expected.remove(&got), "resolved entry {:?} is not expected", got);
         }
     }
 
@@ -392,7 +374,8 @@ mod test {
 
     #[test]
     fn function_with_while_loop() {
-        // Currently we cannot test "for" loop because it desugars to "while" during parsing.
+        // Currently we cannot test "for" loop because it desugars to "while" during
+        // parsing.
         let src = r#"// first line
 var a = 0;
 var cnt = 3;
@@ -426,18 +409,9 @@ add(a); add(a);
     #[test]
     fn compile_time_keywords_error() {
         let tests = [
-            (
-                "fun main() {print this;}",
-                "\"this\" outside of method is compile time error",
-            ),
-            (
-                "var a = 1; return a;",
-                "\"return\" in global scope is forbidden",
-            ),
-            (
-                "class TestClass {init() {return 1;} }",
-                "\"return\" in initializer is forbidden",
-            ),
+            ("fun main() {print this;}", "\"this\" outside of method is compile time error"),
+            ("var a = 1; return a;", "\"return\" in global scope is forbidden"),
+            ("class TestClass {init() {return 1;} }", "\"return\" in initializer is forbidden"),
         ];
         for (test, explanation) in tests {
             let tokens = Scanner::new().scan(test).unwrap();

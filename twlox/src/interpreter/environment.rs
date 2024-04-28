@@ -21,10 +21,7 @@ pub struct Environment {
 
 impl Environment {
     pub fn new(enclosing: Rc<RefCell<Environment>>) -> Self {
-        Self {
-            values: Default::default(),
-            enclosing: Some(enclosing),
-        }
+        Self { values: Default::default(), enclosing: Some(enclosing) }
     }
 
     pub fn define<T: Into<PValue>>(&mut self, name: &str, value: T) {
@@ -42,9 +39,7 @@ impl Environment {
         if depth == 0 {
             return self.values.get(name).cloned();
         }
-        let Some(env) = self.enclosing.clone() else {
-            return None;
-        };
+        let env = self.enclosing.clone()?;
         let env_borrowed = env.borrow();
         env_borrowed.get_at(name, depth - 1)
     }
@@ -105,10 +100,7 @@ mod test {
         }
 
         for lvl in min_lvl..=max_lvl {
-            assert_eq!(
-                base.get_at(field, max_lvl - lvl),
-                Some(Value::from(lvl as f64).to_rc())
-            );
+            assert_eq!(base.get_at(field, max_lvl - lvl), Some(Value::from(lvl as f64).to_rc()));
         }
     }
 
@@ -125,18 +117,11 @@ mod test {
             base.define(field, Value::from(lvl as f64).to_rc());
         }
         for lvl in min_lvl..=max_lvl {
-            assert_eq!(
-                base.get_at(field, max_lvl - lvl),
-                Some(Value::from(lvl as f64).to_rc())
-            );
+            assert_eq!(base.get_at(field, max_lvl - lvl), Some(Value::from(lvl as f64).to_rc()));
 
-            base.assign_at(field, Value::from(-(lvl as f64)).to_rc(), max_lvl - lvl)
-                .unwrap();
+            base.assign_at(field, Value::from(-(lvl as f64)).to_rc(), max_lvl - lvl).unwrap();
 
-            assert_eq!(
-                base.get_at(field, max_lvl - lvl),
-                Some(Value::from(-(lvl as f64)).to_rc())
-            );
+            assert_eq!(base.get_at(field, max_lvl - lvl), Some(Value::from(-(lvl as f64)).to_rc()));
         }
     }
 
@@ -166,8 +151,7 @@ mod test {
         env.assign(field, Value::from("changed").to_rc()).unwrap();
         assert_eq!(*value.borrow(), Value::from("changed"));
 
-        env.assign_at(field, Value::from("changed2").to_rc(), 0)
-            .unwrap();
+        env.assign_at(field, Value::from("changed2").to_rc(), 0).unwrap();
         assert_eq!(*value.borrow(), Value::from("changed2"));
     }
 
@@ -184,10 +168,7 @@ mod test {
         assert_eq!(main_env.get(field), Some(Value::from("val2").to_rc()));
         assert_eq!(main_env.get_at(field, 1), Some(Value::from("val1").to_rc()));
 
-        base_env
-            .borrow_mut()
-            .assign(field, Value::from("val0"))
-            .unwrap();
+        base_env.borrow_mut().assign(field, Value::from("val0")).unwrap();
         assert_eq!(main_env.get_at(field, 1), Some(Value::from("val0").to_rc()));
     }
 
