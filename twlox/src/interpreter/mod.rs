@@ -1,3 +1,5 @@
+// TODO: Use Rc::<method> instead of <variable>.<method>
+// https://doc.rust-lang.org/std/rc/struct.Rc.html
 pub mod environment;
 pub mod value;
 
@@ -152,6 +154,7 @@ impl Interpreter {
         res
     }
 
+    // TODO: remove when integration tests are moved from "runner.rs".
     pub fn env(&self) -> Ref<'_, Environment> {
         self.env.borrow()
     }
@@ -168,6 +171,20 @@ impl Interpreter {
         }
         .ok_or(Error::UndefinedVariable { tok: token })
         .map(Into::into)
+    }
+
+    fn bind_this(&self, func: &Function, instance: PValue) -> Function {
+        if let Value::Instance(_) = &*instance.borrow() {
+            let mut closure = Environment::new(self.env.clone());
+            closure.define("this", instance.clone());
+            Function {
+                declaration: func.declaration.clone(),
+                closure: Rc::new(RefCell::new(closure)),
+                is_init: func.is_init,
+            }
+        } else {
+            panic!("bind_this on not an instance");
+        }
     }
 }
 
@@ -392,8 +409,17 @@ impl ExprVisitor<Result> for Interpreter {
     fn visit_get(&mut self, expr: &expr::Get) -> Result {
         let obj_rc = self.evaluate(&expr.obj)?;
         let obj = obj_rc.borrow();
+        let name = expr.name.lexeme();
         if let Value::Instance(val) = &*obj {
-            val.get(&expr.name).ok_or(Error::UndefinedProperty {
+            if let Some(var) = val.fields.get(name) {
+                return Ok(var.clone());
+            }
+            if let Some(method) = val.class.methods.get(name) {
+                return Ok(
+                    Value::Function(self.bind_this(&method.borrow(), obj_rc.clone())).to_rc(),
+                );
+            }
+            Err(Error::UndefinedProperty {
                 tok: expr.name.clone(),
             })
         } else {
@@ -405,15 +431,23 @@ impl ExprVisitor<Result> for Interpreter {
 
     fn visit_set(&mut self, expr: &expr::Set) -> Result {
         let obj_rc = self.evaluate(&expr.obj)?;
-        let mut obj = obj_rc.borrow_mut();
-        let Value::Instance(val) = &mut *obj else {
+        if !matches!(*obj_rc.borrow(), Value::Instance(_)) {
             return Err(Error::PropertyNotOnObj {
                 property: expr.name.clone(),
             });
-        };
+        }
         let value = self.evaluate(&expr.value)?;
-        val.set(&expr.name, value.clone());
+        let mut obj = obj_rc.borrow_mut();
+        if let Value::Instance(val) = &mut *obj {
+            val.set(&expr.name, value.clone());
+        } else {
+            unreachable!("we checked above that the object is an instance");
+        }
         Ok(value)
+    }
+
+    fn visit_this(&mut self, expr: &expr::This) -> Result {
+        self.lookup_variable(expr.keyword.clone())
     }
 }
 
@@ -434,6 +468,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
             let func = Function {
                 declaration: method.clone(),
                 closure: self.env.clone(),
+                is_init: method.name.lexeme() == "init",
             };
             methods.insert(
                 method.name.lexeme().to_string(),
@@ -460,6 +495,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
         let function = Value::Function(Function {
             declaration: stmt.clone(),
             closure: self.env.clone(),
+            is_init: false,
         });
         self.env
             .borrow_mut()

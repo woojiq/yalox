@@ -49,10 +49,12 @@ impl Environment {
         env_borrowed.get_at(name, depth - 1)
     }
 
+    // TODO: Refactor, merge "assign" and "assign_at", "get" and "get_at".
     pub fn assign<T: Into<PValue>>(&mut self, name: &str, value: T) -> Result {
         let value: PValue = value.into();
         if let Some(v) = self.values.get_mut(name) {
-            *v.borrow_mut() = value.borrow().clone();
+            let new_val = value.borrow().clone();
+            *v.borrow_mut() = new_val;
             Ok(())
         } else if self
             .enclosing
@@ -69,7 +71,8 @@ impl Environment {
         let value: PValue = value.into();
         if depth == 0 {
             if let Some(val) = self.values.get_mut(name) {
-                *val.borrow_mut() = value.borrow().clone();
+                let new_val = value.borrow().clone();
+                *val.borrow_mut() = new_val;
                 return Ok(());
             } else {
                 return Err(Error::VarNotFound);

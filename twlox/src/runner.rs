@@ -184,4 +184,42 @@ Bacon().eat(v); Bacon().eat(v2); Bacon().eat(v);
         assert_eq!(env.get("v"), Some(Value::Num(2.0).to_rc()));
         assert_eq!(env.get("v2"), Some(Value::Num(1.0).to_rc()));
     }
+
+    #[test]
+    fn self_assignment() {
+        let src = "\
+var a = 1;
+var a = a;
+var b = 2;
+b = b;
+";
+        let mut runner = Runner::new();
+        runner.run(src).unwrap();
+        let env = runner.interpreter.env();
+        assert_eq!(env.get("a"), Some(Value::Num(1.0).to_rc()));
+        assert_eq!(env.get("b"), Some(Value::Num(2.0).to_rc()));
+    }
+
+    #[test]
+    fn class_with_this_keyword() {
+        let src = "\
+class Test {
+    init(v) {
+        this.v = 0;
+        return;
+    }
+    add() {
+        this.v = this.v + 1;
+    }
+}
+var test = Test(0);
+test = test.init(0);
+test.add(); test.add(); test.add();
+var res = test.v;
+";
+        let mut runner = Runner::new();
+        runner.run(src).unwrap();
+        let env = runner.interpreter.env();
+        assert_eq!(env.get("res"), Some(Value::Num(3.0).to_rc()));
+    }
 }

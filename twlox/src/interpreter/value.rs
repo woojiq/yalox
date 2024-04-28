@@ -82,6 +82,7 @@ pub trait Callable {
 pub struct Function {
     pub declaration: stmt::Function,
     pub closure: Rc<RefCell<Environment>>,
+    pub is_init: bool,
 }
 
 impl Callable for Function {
@@ -97,8 +98,18 @@ impl Callable for Function {
         }
         drop(env_mut);
         match interpreter.execute_block(&self.declaration.body, env) {
-            Ok(_) => Ok(Value::Nil.to_rc()),
-            Err(Error::Return(val)) => Ok(val),
+            Ok(_) => {
+                if self.is_init {
+                    return Ok(self.closure.borrow_mut().get_at("this", 0).unwrap());
+                }
+                Ok(Value::Nil.to_rc())
+            }
+            Err(Error::Return(val)) => {
+                if self.is_init {
+                    return Ok(self.closure.borrow_mut().get_at("this", 0).unwrap());
+                }
+                Ok(val)
+            }
             Err(err) => Err(err),
         }
     }
@@ -128,16 +139,6 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn get(&self, name: &Token) -> Option<PValue> {
-        if self.fields.contains_key(name.lexeme()) {
-            return self.fields.get(name.lexeme()).cloned();
-        }
-        self.class
-            .methods
-            .get(name.lexeme())
-            .map(|func| Rc::new(RefCell::new(Value::Function(func.borrow().clone()))))
-    }
-
     pub fn set(&mut self, name: &Token, val: PValue) {
         self.fields.insert(name.lexeme().to_owned(), val);
     }
@@ -149,16 +150,34 @@ pub struct Class {
     pub methods: HashMap<String, Rc<RefCell<Function>>>,
 }
 
+impl Class {
+    pub fn get_method(&self, name: &Token) -> Option<Rc<RefCell<Function>>> {
+        self.methods.get(name.lexeme()).cloned()
+    }
+}
+
 impl Callable for Class {
     fn arity(&self) -> usize {
-        0
+        if let Some(init) = self.methods.get("init") {
+            init.borrow().arity()
+        } else {
+            0
+        }
     }
 
-    fn call(&self, _interpreter: &mut Interpreter, _args: Vec<PValue>) -> Result {
-        let instance = Instance {
+    fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
+        let instance = Value::Instance(Instance {
             class: self.clone(),
             fields: HashMap::default(),
-        };
-        Ok(Value::Instance(instance).to_rc())
+        })
+        .to_rc();
+        // TODO: Add find_method method.
+        if let Some(init) = self.methods.get("init") {
+            interpreter
+                .bind_this(&init.borrow(), instance.clone())
+                .call(interpreter, args)
+                .unwrap();
+        }
+        Ok(instance)
     }
 }

@@ -15,7 +15,9 @@ use crate::{
 pub enum Error {
     ReadInInit { name: Token },
     AlreadyExists { name: Token },
-    ReturnNotInFunc,
+    GlobalReturn,
+    ReturnInInitializer,
+    ThisNotInClass { name: Token },
 }
 
 impl fmt::Display for Error {
@@ -33,7 +35,15 @@ impl fmt::Display for Error {
                 name.lexeme(),
                 name.pos()
             ),
-            Error::ReturnNotInFunc => write!(f, "Return is disallowed in global scope."),
+            Error::GlobalReturn => write!(f, "Return is disallowed in global scope."),
+            Error::ReturnInInitializer => {
+                write!(f, "\"return\" keyword is disallowed in initializers")
+            }
+            Error::ThisNotInClass { name } => write!(
+                f,
+                "\"this\" keyword at {} is allowed only in classes",
+                name.pos()
+            ),
         }
     }
 }
@@ -43,7 +53,14 @@ type Result<T = (), E = Vec<Error>> = std::result::Result<T, E>;
 #[derive(Copy, Clone, Debug)]
 pub enum FunctionType {
     Function,
+    Initializer,
     Method,
+    None,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ClassType {
+    Class,
     None,
 }
 
@@ -63,6 +80,7 @@ pub struct Resolver<'a> {
     resolve_cb: &'a mut dyn FnMut(ResolvedEntry),
     scopes: VecDeque<HashMap<String, bool>>,
     current_func: FunctionType,
+    current_class: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -71,6 +89,7 @@ impl<'a> Resolver<'a> {
             resolve_cb,
             scopes: VecDeque::default(),
             current_func: FunctionType::None,
+            current_class: ClassType::None,
         }
     }
 
@@ -211,8 +230,20 @@ impl<'a> ExprVisitor<Result> for Resolver<'a> {
     }
 
     fn visit_set(&mut self, expr: &Set) -> Result {
-        expr.obj.accept(self)?;
-        expr.value.accept(self)
+        expr.value.accept(self)?;
+        expr.obj.accept(self)
+    }
+
+    fn visit_this(&mut self, expr: &This) -> Result {
+        match self.current_class {
+            ClassType::Class => {
+                self.resolve_local(&expr.keyword);
+                Ok(())
+            }
+            ClassType::None => Err(vec![Error::ThisNotInClass {
+                name: expr.keyword.clone(),
+            }]),
+        }
     }
 }
 
@@ -225,13 +256,29 @@ impl<'a> StmtVisitor<Result> for Resolver<'a> {
     }
 
     fn visit_class(&mut self, stmt: &Class) -> Result {
+        let enclosing_class = self.current_class;
+        self.current_class = ClassType::Class;
         if let Err(err) = self.declare(&stmt.name) {
             return Err(vec![err]);
         }
         self.define(&stmt.name);
+        self.begin_scope();
+        self.scopes
+            .back_mut()
+            .unwrap()
+            .insert("this".to_string(), true);
         for method in &stmt.methods {
-            self.resolve_func(method, FunctionType::Method)?;
+            self.resolve_func(
+                method,
+                if method.name.lexeme() == "init" {
+                    FunctionType::Initializer
+                } else {
+                    FunctionType::Method
+                },
+            )?;
         }
+        self.end_scope();
+        self.current_class = enclosing_class;
         Ok(())
     }
 
@@ -269,9 +316,12 @@ impl<'a> StmtVisitor<Result> for Resolver<'a> {
 
     fn visit_return(&mut self, stmt: &Return) -> Result {
         if let FunctionType::None = self.current_func {
-            return Err(vec![Error::ReturnNotInFunc]);
+            return Err(vec![Error::GlobalReturn]);
         }
         if let Some(ret) = &stmt.value {
+            if let FunctionType::Initializer = self.current_func {
+                return Err(vec![Error::ReturnInInitializer]);
+            }
             ret.accept(self)?;
         }
         Ok(())
@@ -372,4 +422,34 @@ add(a); add(a);
         let mut resolver = Resolver::new(&mut cb);
         resolver.resolve_stmts(&stmts).unwrap();
     }
+
+    #[test]
+    fn compile_time_keywords_error() {
+        let tests = [
+            (
+                "fun main() {print this;}",
+                "\"this\" outside of method is compile time error",
+            ),
+            (
+                "var a = 1; return a;",
+                "\"return\" in global scope is forbidden",
+            ),
+            (
+                "class TestClass {init() {return 1;} }",
+                "\"return\" in initializer is forbidden",
+            ),
+        ];
+        for (test, explanation) in tests {
+            let tokens = Scanner::new().scan(test).unwrap();
+            let stmts = Parser::new(tokens).parse().unwrap();
+            let mut cb = |_| {};
+            let mut resolver = Resolver::new(&mut cb);
+            assert!(
+                resolver.resolve_stmts(&stmts).is_err(),
+                "source: \"{test}\"\nreason: {explanation}"
+            );
+        }
+    }
+
+    // TODO (test): resolve class with "this" keyword
 }

@@ -462,6 +462,9 @@ impl Parser {
         if let Some(tok) = self.tokens.next_if_type(TokenType::Identifier) {
             return Ok(Expr::new_variable(tok));
         }
+        if let Some(tok) = self.tokens.next_if_type(TokenType::This) {
+            return Ok(Expr::new_this(tok));
+        }
         Err(Error::General {
             msg: "primary expression".into(),
             location: self.tokens.location(),
@@ -584,7 +587,7 @@ mod test {
     #[test]
     fn class_declaration() {
         let tokens = Scanner::new()
-            .scan("class Random {method() {return;}}")
+            .scan("class Random {method() {return this;}}")
             .unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
         let expected = [Stmt::new_class(
@@ -592,7 +595,11 @@ mod test {
             vec![Function {
                 name: Token::new(Identifier, "method", pos(1, 15)),
                 params: vec![],
-                body: vec![Stmt::new_return(None)],
+                body: vec![Stmt::new_return(Some(Expr::new_this(Token::new(
+                    This,
+                    "this",
+                    pos(1, 32),
+                ))))],
             }],
         )];
 

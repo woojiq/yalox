@@ -194,6 +194,9 @@ pub mod expr {
             Variable {
                 name: Token,
             },
+            This {
+                keyword: Token,
+            },
         }
     }
 
@@ -225,11 +228,14 @@ pub mod expr {
                 Expr::Variable(v) => v.name.lexeme().fmt(f),
                 Expr::Get(g) => write!(f, "{}.{}", g.obj, g.name.lexeme()),
                 Expr::Set(s) => write!(f, "{}.{} = {}", s.obj, s.name.lexeme(), s.value),
+                Expr::This(t) => write!(f, "{}", t.keyword.lexeme()),
             }
         }
     }
 
     // Wasn't able to generate this in ast_helper! macro.
+    // UPD (above): WHAT?
+    /// Methods like "new_<enum_option>" are generated in [`ast_helper!`] macro.
     impl Expr {
         pub fn to_box(self) -> Box<Self> {
             self.into()
