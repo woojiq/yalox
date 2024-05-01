@@ -1,30 +1,16 @@
 pub mod token;
 
-use std::fmt;
-
 use token::{Token, TokenType};
 
 use crate::{MultiPeekable, Position};
 
+#[derive(thiserror::Error)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
+    #[error("unterminated string started at {0}")]
     UnterminatedString(Position),
-    UnexpectedChar { position: Position, character: char },
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Error::UnterminatedString(start) =>
-                    format!("Unterminated string started from {}", start),
-                Error::UnexpectedChar { position, character } =>
-                    format!("Unexpected character '{}' at {}", character, position),
-            }
-        )
-    }
+    #[error("unexpected character '{character}' at {pos}")]
+    UnexpectedChar { pos: Position, character: char },
 }
 
 struct Chars {
@@ -126,6 +112,8 @@ impl Scanner {
     }
 
     fn scan_token(&mut self, ch: char, chars: &mut Chars) -> Result<Option<Token>, Error> {
+        // Creates a token with one character lookahead.
+        // Define it inside the function to satisfy macro hygiene.
         macro_rules! token {
             ($type:ident) => {
                 Token::new(TokenType::$type, ch, self.pos)
@@ -174,7 +162,7 @@ impl Scanner {
             d if d.is_ascii_digit() => self.scan_floating_num(chars),
             ch if ch.is_ascii_alphabetic() => self.scan_word(chars),
             unexpected => {
-                return Err(Error::UnexpectedChar { position: self.pos, character: unexpected });
+                return Err(Error::UnexpectedChar { pos: self.pos, character: unexpected });
             }
         };
 
@@ -332,10 +320,10 @@ mod test {
     fn unexpected_char() {
         let errors = Scanner::default().scan("[]\n\n  ^\n 😃").err().unwrap();
         let expected = [
-            Error::UnexpectedChar { position: pos(1, 1), character: '[' },
-            Error::UnexpectedChar { position: pos(1, 2), character: ']' },
-            Error::UnexpectedChar { position: pos(3, 3), character: '^' },
-            Error::UnexpectedChar { position: pos(4, 2), character: '😃' },
+            Error::UnexpectedChar { pos: pos(1, 1), character: '[' },
+            Error::UnexpectedChar { pos: pos(1, 2), character: ']' },
+            Error::UnexpectedChar { pos: pos(3, 3), character: '^' },
+            Error::UnexpectedChar { pos: pos(4, 2), character: '😃' },
         ];
         compare_each(&errors, &expected);
     }

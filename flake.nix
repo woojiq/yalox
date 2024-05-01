@@ -19,7 +19,7 @@
           packages = with pkgs; [
             # Rust
             (lib.hiPrio rust-nightly.rustfmt)
-            (lib.hiPrio rust-nightly.rust-analyzer)
+            rust-analyzer
             rust-bin.stable.latest.default
             gdb
             cargo-tarpaulin

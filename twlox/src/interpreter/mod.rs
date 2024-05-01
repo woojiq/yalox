@@ -1,12 +1,9 @@
-// TODO: Use Rc::<method> instead of <variable>.<method>
-// https://doc.rust-lang.org/std/rc/struct.Rc.html
 pub mod environment;
 pub mod value;
 
 use std::{
     cell::{Ref, RefCell},
     collections::HashMap,
-    fmt,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,55 +21,31 @@ use crate::{
     Position,
 };
 
+#[derive(thiserror::Error)]
 #[derive(Debug, Clone)]
 pub enum Error {
+    #[error("undefined variable '{}' at {}", .tok.lexeme(), .tok.pos())]
     UndefinedVariable { tok: Token },
+    #[error("wrong arity at {}", .tok.pos())]
     UndefinedProperty { tok: Token },
+    #[error("wrong arity at {}", .tok.pos())]
     Arity { tok: Token },
+    #[error("expected boolean in condition: {}", .stmt.condition)]
     ConditionExpected { stmt: stmt::If },
+    #[error("only instances have properties at {}", .property.pos())]
     PropertyNotOnObj { property: Token },
+    #[error("'{}' expected {}, found {} at {}", .op.lexeme(), .expected, .found, .op.pos())]
     InvalidOperand { op: Token, expected: &'static str, found: Value },
+    #[error("division by zero at {}", .op.pos())]
     DivisionByZero { op: Token },
 
     // === Not exactly Errors === //
+    // TODO: Store only errors in 'Error' enum.
+    #[error("UNREACHABLE")]
     Return(PValue),
 }
 
 type Result<T = PValue, E = Error> = std::result::Result<T, E>;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::UndefinedVariable { tok } => {
-                write!(f, "undefined variable {} at {}", tok.lexeme(), tok.pos())
-            }
-            Error::Arity { tok } => write!(f, "wrong arity at {}", tok.pos()),
-            Error::ConditionExpected { stmt } => {
-                write!(f, "expected boolean in condition: {}", stmt.condition)
-            }
-            Error::Return(_) => unreachable!(),
-            Error::PropertyNotOnObj { property: prop } => {
-                write!(f, "only instances have properties at {}", prop.pos())
-            }
-            Error::UndefinedProperty { tok } => {
-                write!(f, "undefined property {} at {}", tok.lexeme(), tok.pos())
-            }
-            Error::InvalidOperand { op, expected, found } => {
-                write!(
-                    f,
-                    "'{}' expected {}, found {} at {}",
-                    op.lexeme(),
-                    expected,
-                    found,
-                    op.pos()
-                )
-            }
-            Error::DivisionByZero { op } => {
-                write!(f, "division by zero at {}", op.pos())
-            }
-        }
-    }
-}
 
 pub struct Interpreter {
     env: Rc<RefCell<Environment>>,
@@ -96,7 +69,7 @@ impl Interpreter {
             .to_rc(),
         );
 
-        Self { env: globals.clone(), globals, locals: HashMap::default() }
+        Self { env: Rc::clone(&globals), globals, locals: HashMap::default() }
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<()> {
@@ -119,7 +92,7 @@ impl Interpreter {
         statements: &[Stmt],
         env: Rc<RefCell<Environment>>,
     ) -> Result<()> {
-        let prev_env = self.env.clone();
+        let prev_env = Rc::clone(&self.env);
         self.env = env;
         let res = self.interpret(statements);
         self.env = prev_env;
@@ -147,8 +120,8 @@ impl Interpreter {
 
     fn bind_this(&self, func: &Function, instance: PValue) -> Function {
         if let Value::Instance(_) = &*instance.borrow() {
-            let mut closure = Environment::new(self.env.clone());
-            closure.define("this", instance.clone());
+            let mut closure = Environment::new(Rc::clone(&self.env));
+            closure.define("this", Rc::clone(&instance));
             Function {
                 declaration: func.declaration.clone(),
                 closure: Rc::new(RefCell::new(closure)),
@@ -329,13 +302,13 @@ impl ExprVisitor<Result> for Interpreter {
     fn visit_assign(&mut self, expr: &expr::Assign) -> Result {
         let value = self.evaluate(&expr.value)?;
         let status = if let Some(&depth) = self.locals.get(&expr.name.pos()) {
-            self.env.borrow_mut().assign_at(expr.name.lexeme(), value.clone(), depth)
+            self.env.borrow_mut().assign_at(expr.name.lexeme(), Rc::clone(&value), depth)
         } else {
-            self.env.borrow_mut().assign(expr.name.lexeme(), value.clone())
+            self.env.borrow_mut().assign(expr.name.lexeme(), Rc::clone(&value))
         };
         match status {
             Ok(()) => Ok(value),
-            Err(environment::Error::VarNotFound) => {
+            Err(environment::Error::AssignVarNotFound(_)) => {
                 Err(Error::UndefinedVariable { tok: expr.name.clone() })
             }
         }
@@ -374,11 +347,11 @@ impl ExprVisitor<Result> for Interpreter {
         let name = expr.name.lexeme();
         if let Value::Instance(val) = &*obj {
             if let Some(var) = val.fields.get(name) {
-                return Ok(var.clone());
+                return Ok(Rc::clone(var));
             }
             if let Some(method) = val.class.methods.get(name) {
                 return Ok(
-                    Value::Function(self.bind_this(&method.borrow(), obj_rc.clone())).to_rc()
+                    Value::Function(self.bind_this(&method.borrow(), Rc::clone(&obj_rc))).to_rc()
                 );
             }
             Err(Error::UndefinedProperty { tok: expr.name.clone() })
@@ -395,7 +368,7 @@ impl ExprVisitor<Result> for Interpreter {
         let value = self.evaluate(&expr.value)?;
         let mut obj = obj_rc.borrow_mut();
         if let Value::Instance(val) = &mut *obj {
-            val.set(&expr.name, value.clone());
+            val.set(&expr.name, Rc::clone(&value));
         } else {
             unreachable!("we checked above that the object is an instance");
         }
@@ -411,7 +384,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
     fn visit_block(&mut self, stmt: &stmt::Block) -> Result<()> {
         self.execute_block(
             &stmt.statements,
-            Rc::new(RefCell::new(Environment::new(self.env.clone()))),
+            Rc::new(RefCell::new(Environment::new(Rc::clone(&self.env)))),
         )
     }
 
@@ -421,7 +394,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
         for method in &stmt.methods {
             let func = Function {
                 declaration: method.clone(),
-                closure: self.env.clone(),
+                closure: Rc::clone(&self.env),
                 is_init: method.name.lexeme() == "init",
             };
             methods.insert(method.name.lexeme().to_string(), Rc::new(RefCell::new(func)));
@@ -440,7 +413,7 @@ impl StmtVisitor<Result<()>> for Interpreter {
     fn visit_function(&mut self, stmt: &stmt::Function) -> Result<()> {
         let function = Value::Function(Function {
             declaration: stmt.clone(),
-            closure: self.env.clone(),
+            closure: Rc::clone(&self.env),
             is_init: false,
         });
         self.env.borrow_mut().define(stmt.name.lexeme(), function.to_rc());

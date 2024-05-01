@@ -4,15 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{
-    interpreter,
-    interpreter::Interpreter,
-    parser::{self, Parser},
-    resolver,
-    resolver::Resolver,
-    scanner,
-    scanner::Scanner,
-};
+use crate::{interpreter, parser, resolver, scanner};
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -45,12 +37,12 @@ impl Into<Vec<String>> for Error {
 }
 
 pub struct Runner {
-    interpreter: Interpreter,
+    interpreter: interpreter::Interpreter,
 }
 
 impl Runner {
     pub fn new() -> Self {
-        Self { interpreter: Interpreter::new() }
+        Self { interpreter: interpreter::Interpreter::new() }
     }
 
     pub fn run_file(&mut self, path: &Path) {
@@ -84,15 +76,15 @@ impl Runner {
     }
 
     pub fn run(&mut self, src: &str) -> Result<(), Error> {
-        let mut scanner = Scanner::new();
+        let mut scanner = scanner::Scanner::new();
         let tokens = scanner.scan(src).map_err(Error::Scanner)?;
 
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser::Parser::new(tokens);
         let statements = parser.parse().map_err(Error::Parser)?;
 
         let mut callback = |entry| self.interpreter.resolve(entry);
-        let mut resolver = Resolver::new(&mut callback);
-        resolver.resolve_stmts(&statements).map_err(Error::Resolver)?;
+        let resolver = resolver::Resolver::new(&mut callback);
+        resolver.resolve(&statements).map_err(Error::Resolver)?;
 
         self.interpreter.interpret(&statements).map_err(|e| Error::Interpreter(vec![e]))
     }

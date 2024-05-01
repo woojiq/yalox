@@ -94,7 +94,7 @@ impl Callable for Function {
     }
 
     fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
-        let env = Rc::new(RefCell::new(Environment::new(self.closure.clone())));
+        let env = Rc::new(RefCell::new(Environment::new(Rc::clone(&self.closure))));
         let mut env_mut = env.borrow_mut();
         for (param, arg) in self.declaration.params.iter().zip(args) {
             env_mut.define(param.lexeme(), arg);
@@ -161,11 +161,7 @@ impl Class {
 
 impl Callable for Class {
     fn arity(&self) -> usize {
-        if let Some(init) = self.methods.get("init") {
-            init.borrow().arity()
-        } else {
-            0
-        }
+        self.methods.get("init").map(|i| i.borrow().arity()).unwrap_or(0)
     }
 
     fn call(&self, interpreter: &mut Interpreter, args: Vec<PValue>) -> Result {
@@ -174,7 +170,7 @@ impl Callable for Class {
         // TODO: Add find_method method.
         if let Some(init) = self.methods.get("init") {
             interpreter
-                .bind_this(&init.borrow(), instance.clone())
+                .bind_this(&init.borrow(), Rc::clone(&instance))
                 .call(interpreter, args)
                 .unwrap();
         }

@@ -1,44 +1,27 @@
-use std::fmt::Display;
-
 use crate::{
     ast::{expr::*, stmt::*},
     scanner::token::{Token, TokenType},
     MultiPeekable, Position,
 };
 
+#[derive(thiserror::Error)]
 #[derive(Debug, Clone)]
 pub enum Error {
+    #[error("{msg} at {location}")]
     General { msg: String, location: Position },
+    #[error("invalid assignment target at {location}: {target}")]
     InvalidAssignmentTarget { target: Expr, location: Position },
+    #[error("expected token type {expected} found {}",
+        if let Some(found) = .found {
+            format!("'{}' at {}", found.lexeme(), found.pos())
+        } else {
+            "EOF".to_string()
+        }
+    )]
     UnexpectedTokenType { expected: TokenType, found: Option<Token> },
 }
 
 type Result<T> = std::result::Result<T, Error>;
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::General { msg, location } => {
-                write!(f, "{} at {}", msg, location)
-            }
-            Error::InvalidAssignmentTarget { target, location } => {
-                write!(f, "Invalid assignment target at {location}: {target}",)
-            }
-            Error::UnexpectedTokenType { expected, found: Some(found) } => {
-                write!(
-                    f,
-                    "expected token type {:?} found {} at {}",
-                    expected,
-                    found.lexeme(),
-                    found.pos()
-                )
-            }
-            Error::UnexpectedTokenType { expected, found: None } => {
-                write!(f, "expected token type {:?} found EOF", expected,)
-            }
-        }
-    }
-}
 
 struct Tokens {
     inner: Vec<Token>,
@@ -189,8 +172,8 @@ impl Parser {
     }
 
     fn statement(&mut self) -> Result<Stmt> {
-        if self.tokens.next_if_type_b(TokenType::Return) {
-            self.return_statement()
+        if let Some(tok) = self.tokens.next_if_type(TokenType::Return) {
+            self.return_statement(tok)
         } else if self.tokens.next_if_type_b(TokenType::For) {
             self.for_statement()
         } else if self.tokens.next_if_type_b(TokenType::While) {
@@ -206,11 +189,11 @@ impl Parser {
         }
     }
 
-    fn return_statement(&mut self) -> Result<Stmt> {
+    fn return_statement(&mut self, keyword: Token) -> Result<Stmt> {
         let value =
             if self.tokens.is_type(TokenType::Semicolon) { None } else { Some(self.expression()?) };
         self.try_consume(TokenType::Semicolon)?;
-        Ok(Stmt::new_return(value))
+        Ok(Stmt::new_return(keyword, value))
     }
 
     fn for_statement(&mut self) -> Result<Stmt> {
@@ -427,7 +410,7 @@ impl Parser {
         }
         if self.tokens.next_if_type_b(TokenType::LeftParen) {
             let expr = self.expression()?;
-            self.try_consume(TokenType::RightParen).unwrap();
+            self.try_consume(TokenType::RightParen)?;
             return Ok(Expr::new_grouping(expr.to_box()));
         }
         if let Some(tok) = self.tokens.next_if_type(TokenType::Identifier) {
@@ -555,11 +538,10 @@ mod test {
             vec![Function {
                 name: Token::new(Identifier, "method", pos(1, 15)),
                 params: vec![],
-                body: vec![Stmt::new_return(Some(Expr::new_this(Token::new(
-                    This,
-                    "this",
-                    pos(1, 32),
-                ))))],
+                body: vec![Stmt::new_return(
+                    Token::new(Return, "return", pos(1, 25)),
+                    Some(Expr::new_this(Token::new(This, "this", pos(1, 32)))),
+                )],
             }],
         )];
 

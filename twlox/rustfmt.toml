@@ -2,6 +2,7 @@ max_width = 100
 use_small_heuristics = "Max"
 newline_style = "Unix"
 # fn_params_layout = "Compressed"
+merge_derives = false
 error_on_unformatted = true
 error_on_line_overflow = true
 

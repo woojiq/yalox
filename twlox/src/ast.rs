@@ -3,7 +3,7 @@
 ///
 /// For a better understanding, see where this macro is already used. All
 /// meta information (e.g. derive) that the enum has will be propagated to all
-/// structures.
+/// structs/enums.
 macro_rules! ast {
     // Matches full enum with meta information.
     (
@@ -45,8 +45,7 @@ macro_rules! ast {
     }};
 }
 
-/// Helper macro to [`ast!`]. It is responsible for creating an enum or struct
-/// and constructor method.
+/// Responsible for creating an enum or struct and its constructor method.
 macro_rules! ast_helper {
     (
         $enum_name:ident
@@ -119,6 +118,7 @@ pub mod stmt {
                 expression: Expr,
             },
             Return {
+                keyword: Token,
                 value: Option<Expr>,
             },
             Var {
@@ -238,8 +238,6 @@ pub mod expr {
         }
     }
 
-    // Wasn't able to generate this in ast_helper! macro.
-    // UPD (above): WHAT?
     /// Methods like "new_<enum_option>" are generated in [`ast_helper!`] macro.
     impl Expr {
         pub fn to_box(self) -> Box<Self> {

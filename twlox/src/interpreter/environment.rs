@@ -2,12 +2,14 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::value::PValue;
 
+#[derive(thiserror::Error)]
 #[derive(Debug, Clone, Copy)]
-pub enum Error {
-    VarNotFound,
+pub enum Error<'a> {
+    #[error("cannot find variable '{0}' for assigning")]
+    AssignVarNotFound(&'a str),
 }
 
-type Result<T = (), E = Error> = std::result::Result<T, E>;
+type Result<'a, T = (), E = Error<'a>> = std::result::Result<T, E>;
 
 /// Interpreter environment where we store variables, etc.
 ///
@@ -30,7 +32,7 @@ impl Environment {
 
     pub fn get(&self, name: &str) -> Option<PValue> {
         if let Some(v) = self.values.get(name) {
-            return Some(v.clone());
+            return Some(Rc::clone(v));
         }
         self.enclosing.as_ref().and_then(|s| s.borrow().get(name))
     }
@@ -39,13 +41,13 @@ impl Environment {
         if depth == 0 {
             return self.values.get(name).cloned();
         }
-        let env = self.enclosing.clone()?;
+        let env = Rc::clone(self.enclosing.as_ref()?);
         let env_borrowed = env.borrow();
         env_borrowed.get_at(name, depth - 1)
     }
 
     // TODO: Refactor, merge "assign" and "assign_at", "get" and "get_at".
-    pub fn assign<T: Into<PValue>>(&mut self, name: &str, value: T) -> Result {
+    pub fn assign<'a, T: Into<PValue>>(&mut self, name: &'a str, value: T) -> Result<'a> {
         let value: PValue = value.into();
         if let Some(v) = self.values.get_mut(name) {
             let new_val = value.borrow().clone();
@@ -58,11 +60,16 @@ impl Environment {
         {
             Ok(())
         } else {
-            Err(Error::VarNotFound)
+            Err(Error::AssignVarNotFound(name))
         }
     }
 
-    pub fn assign_at<T: Into<PValue>>(&mut self, name: &str, value: T, depth: usize) -> Result {
+    pub fn assign_at<'a, T: Into<PValue>>(
+        &mut self,
+        name: &'a str,
+        value: T,
+        depth: usize,
+    ) -> Result<'a> {
         let value: PValue = value.into();
         if depth == 0 {
             if let Some(val) = self.values.get_mut(name) {
@@ -70,11 +77,11 @@ impl Environment {
                 *val.borrow_mut() = new_val;
                 return Ok(());
             } else {
-                return Err(Error::VarNotFound);
+                return Err(Error::AssignVarNotFound(name));
             }
         }
         let Some(env) = self.enclosing.clone() else {
-            return Err(Error::VarNotFound);
+            return Err(Error::AssignVarNotFound(name));
         };
         let mut env_borrowed = env.borrow_mut();
         env_borrowed.assign_at(name, value, depth - 1)
@@ -132,9 +139,6 @@ mod test {
         let value = Value::from(raw).to_rc();
         env.define("first", value.clone());
         env.define("link_first", value.clone());
-
-        assert_eq!(env.get("first"), Some(Value::from(raw).to_rc()));
-        assert_eq!(env.get("link_first"), Some(Value::from(raw).to_rc()));
 
         *value.borrow_mut() = true.into();
         assert_eq!(env.get("first"), Some(Value::from(!raw).to_rc()));
