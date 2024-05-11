@@ -57,7 +57,13 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         let globals = Rc::new(RefCell::new(Environment::default()));
-        globals.borrow_mut().define(
+        Self::define_globals(&mut globals.borrow_mut());
+
+        Self { env: Rc::clone(&globals), globals, locals: HashMap::default() }
+    }
+
+    fn define_globals(globals: &mut Environment) {
+        globals.define(
             "clock",
             Value::NativeFunction(NativeFunction {
                 name: "clock".to_string(),
@@ -68,8 +74,19 @@ impl Interpreter {
             })
             .to_rc(),
         );
-
-        Self { env: Rc::clone(&globals), globals, locals: HashMap::default() }
+        globals.define(
+            "print",
+            Value::NativeFunction(NativeFunction {
+                name: "print".to_string(),
+                arity: 1,
+                fun: |_, args| {
+                    assert_eq!(args.len(), 1);
+                    println!("{}", args[0].borrow());
+                    Value::Nil
+                },
+            })
+            .to_rc(),
+        );
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<()> {
@@ -435,12 +452,6 @@ impl StmtVisitor<Result<()>> for Interpreter {
         } else {
             Err(Error::ConditionExpected { stmt: stmt.clone() })
         }
-    }
-
-    fn visit_print(&mut self, stmt: &stmt::Print) -> Result<()> {
-        let expr = self.evaluate(&stmt.expression)?;
-        println!("{}", *expr.borrow());
-        Ok(())
     }
 
     fn visit_return(&mut self, stmt: &stmt::Return) -> Result<()> {

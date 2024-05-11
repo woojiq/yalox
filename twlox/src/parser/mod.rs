@@ -41,22 +41,19 @@ impl Tokens {
     }
 
     /// Consumes the next token if it matches [`TokenType`].
-    ///
-    /// If you want to advance the iterator and get [`Token`] instead of
-    /// [`bool`], use [`Tokens::next_if()`].
     pub fn next_if_type(&mut self, type_: TokenType) -> Option<Token> {
         self.next_if(|t| t.get_type() == type_)
     }
 
     /// The same as [`Tokens::next_if_type()`] but returns [`bool`].
+    ///
+    /// If you want to advance the iterator and get [`Token`] instead of
+    /// [`bool`], use [`Tokens::next_if()`].
     pub fn next_if_type_b(&mut self, type_: TokenType) -> bool {
         self.next_if_type(type_).is_some()
     }
 
     /// Consumes the next token if it matches any of provided [`TokenType`]s.
-    ///
-    /// If you want to advance the iterator and get [`Token`] instead of
-    /// [`bool`], use [`Tokens::next_if()`].
     pub fn next_if_type_one_of(&mut self, types: &[TokenType]) -> Option<Token> {
         self.next_if(|lhs| {
             let lhs = lhs.get_type();
@@ -180,8 +177,6 @@ impl Parser {
             self.while_statement()
         } else if self.tokens.next_if_type_b(TokenType::IF) {
             self.if_statement()
-        } else if self.tokens.next_if_type_b(TokenType::Print) {
-            self.print_statement()
         } else if self.tokens.next_if_type_b(TokenType::LeftBrace) {
             Ok(Stmt::new_block(self.block_statement()?))
         } else {
@@ -256,12 +251,6 @@ impl Parser {
             None
         };
         Ok(Stmt::new_if(condition, then_branch, else_branch))
-    }
-
-    fn print_statement(&mut self) -> Result<Stmt> {
-        let expr = self.expression()?;
-        self.try_consume(TokenType::Semicolon)?;
-        Ok(Stmt::new_print(expr))
     }
 
     fn block_statement(&mut self) -> Result<Vec<Stmt>> {
@@ -433,7 +422,6 @@ impl Parser {
                     | TokenType::Fun
                     | TokenType::For
                     | TokenType::IF
-                    | TokenType::Print
                     | TokenType::Return
                     | TokenType::Var
                     | TokenType::While => {
@@ -475,13 +463,9 @@ mod test {
 
     #[test]
     fn block() {
-        let tokens = Scanner::new().scan("{print a;}").unwrap();
+        let tokens = Scanner::new().scan("{}").unwrap();
         let stmt = Parser::new(tokens).parse().unwrap();
-        let expected = [Stmt::new_block(vec![Stmt::new_print(Expr::new_variable(Token::new(
-            Identifier,
-            "a",
-            pos(1, 8),
-        )))])];
+        let expected = [Stmt::new_block(vec![])];
         compare_each(&stmt, &expected);
     }
 

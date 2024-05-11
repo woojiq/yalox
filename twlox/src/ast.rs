@@ -114,9 +114,6 @@ pub mod stmt {
                 then_branch: Box<Stmt>,
                 else_branch: Option<Box<Stmt>>,
             },
-            Print {
-                expression: Expr,
-            },
             Return {
                 keyword: Token,
                 value: Option<Expr>,
@@ -238,7 +235,7 @@ pub mod expr {
         }
     }
 
-    /// Methods like "new_<enum_option>" are generated in [`ast_helper!`] macro.
+    // Methods like "new_<enum_option>" are generated in ast_helper! macro.
     impl Expr {
         pub fn to_box(self) -> Box<Self> {
             self.into()

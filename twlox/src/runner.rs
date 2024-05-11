@@ -46,7 +46,10 @@ impl Runner {
     }
 
     pub fn run_file(&mut self, path: &Path) {
-        let mut file = File::open(path).unwrap();
+        let mut file = File::open(path).unwrap_or_else(|err| {
+            eprintln!("Error: cannot open {path:?} file.\nReason: {err}");
+            std::process::exit(1);
+        });
         let mut content = String::new();
         file.read_to_string(&mut content).unwrap();
         match self.run(&content) {
@@ -56,16 +59,19 @@ impl Runner {
     }
 
     pub fn run_repl(&mut self) {
+        const REPL_EXIT: &str = "exit";
         let stdin = io::stdin();
         let mut stdout = io::stdout();
         let mut line = String::new();
+        println!("Lox REPL <3\nType Ctrl-D or \"{REPL_EXIT}\" to quit!");
         loop {
             print!("> ");
             stdout.flush().unwrap();
             line.clear();
 
+            // TODO: Support basic motions (C-p, C-n, left, right, etc).
             stdin.read_line(&mut line).unwrap();
-            if line.is_empty() {
+            if line.is_empty() || line.trim() == REPL_EXIT {
                 break;
             }
             match self.run(&line) {
@@ -143,7 +149,7 @@ mod test {
         let src = "\
 var a = \"global\"; var b;
 { fun changeA() { b = a; } changeA(); var a = \"block\"; changeA(); }
-print b;
+print(b);
 ";
         let mut runner = Runner::new();
         runner.run(src).unwrap();

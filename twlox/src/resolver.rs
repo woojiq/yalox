@@ -243,10 +243,6 @@ impl<'a> StmtVisitor<()> for Resolver<'a> {
         }
     }
 
-    fn visit_print(&mut self, stmt: &Print) {
-        stmt.expression.accept(self)
-    }
-
     fn visit_return(&mut self, stmt: &Return) {
         if let FunctionType::None = self.current_func {
             self.errors.push(Error::GlobalReturn { keyword: stmt.keyword.clone() });
@@ -349,7 +345,7 @@ add(a); add(a);
     #[test]
     fn compile_time_keywords_errors() {
         let test = "\
-fun main() {print this;}
+fun main() {print(this);}
 var a = 1; return a;
 class TestClass {init() {return 1;} }
         ";
