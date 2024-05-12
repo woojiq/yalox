@@ -57,6 +57,7 @@ pub enum TokenType {
     Dot,
     Minus,
     Plus,
+    // TODO: Support PlusEqual.
     Semicolon,
     Slash,
     Star,

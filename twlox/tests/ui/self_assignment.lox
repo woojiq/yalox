@@ -1,0 +1,6 @@
+var a = 1;
+var a = a;
+var b = 2;
+b = b;
+print(a); // OUT: 1
+print(b); // OUT: 2

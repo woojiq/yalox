@@ -3,7 +3,13 @@ name = "twlox"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+
 [dependencies]
 lexopt = "0.3.0"
 paste = "1.0.14"
 thiserror = "1.0.59"
+
+[dev-dependencies]
+assert_cmd = { version = "2.0.14", features = ["color", "color-auto"] }
+regex = "1.10.4"

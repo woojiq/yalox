@@ -1,0 +1,5 @@
+fun square_of_sum(a, b) {
+    var c = a + b;
+    return c * c;
+}
+print(square_of_sum(1, 1)); // OUT: 4

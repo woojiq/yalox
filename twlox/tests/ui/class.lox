@@ -1,0 +1,10 @@
+var v = 0;
+class Bacon {
+    eat(v) {
+        v = v + 1;
+    }
+}
+var v2 = 0;
+Bacon().eat(v); Bacon().eat(v2); Bacon().eat(v);
+print(v); // OUT: 2
+print(v2); // OUT: 1

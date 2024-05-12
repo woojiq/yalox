@@ -1,0 +1,6 @@
+var a = 0;
+var n = 5;
+for (var i=0; i<=n; i=i+1) {
+    a = a + i + 0.1;
+}
+print(a); // OUT: 15.6

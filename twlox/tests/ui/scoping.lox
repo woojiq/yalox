@@ -1,0 +1,11 @@
+var a = "global";
+var b;
+{
+    fun changeA() {
+        b = a;
+    }
+    changeA();
+    var a = "block";
+    changeA();
+}
+print(b); // OUT: global

@@ -2,7 +2,7 @@ pub mod environment;
 pub mod value;
 
 use std::{
-    cell::{Ref, RefCell},
+    cell::RefCell,
     collections::HashMap,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
@@ -114,11 +114,6 @@ impl Interpreter {
         let res = self.interpret(statements);
         self.env = prev_env;
         res
-    }
-
-    // TODO: remove when integration tests are moved from "runner.rs".
-    pub fn env(&self) -> Ref<'_, Environment> {
-        self.env.borrow()
     }
 
     pub fn resolve(&mut self, entry: crate::resolver::ResolvedEntry) {
@@ -347,7 +342,7 @@ impl ExprVisitor<Result> for Interpreter {
             Value::Function(f) => f as &dyn Callable,
             Value::NativeFunction(f) => f as &dyn Callable,
             Value::Class(f) => f as &dyn Callable,
-            _ => unreachable!(),
+            _ => todo!("handle incorrect call"),
         };
 
         let args = expr.arguments.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<_>>>()?;

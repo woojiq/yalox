@@ -1,0 +1,13 @@
+class Test {
+    init(v) {
+        this.v = 0;
+        return;
+    }
+    add() {
+        this.v = this.v + 1;
+    }
+}
+var test = Test(0);
+test = test.init(0);
+test.add(); test.add(); test.add();
+print(test.v); // OUT: 3
